@@ -22,6 +22,7 @@
     .drop.loaded { border-color: #555; border-style: solid; }
     .drop .icon  { font-size: 26px; margin-bottom: 4px; }
     .drop .sub   { color: #888; font-size: 11px; margin-top: 3px; }
+    .drop .sub2  { color: #aaa; font-size: 10px; margin-top: 2px; }
     .drop .fname { color: #555; font-size: 11px; margin-top: 5px; word-break: break-all; }
     .drop .status{ color: #888; font-size: 11px; margin-top: 4px; }
     input[type="file"] { display: none; }
@@ -29,7 +30,6 @@
     .player-section { display: none; }
     .player-section.show { display: block; }
 
-    /* video wrapper — height is set by JS, drag handle resizes it */
     .pvideo {
       position: relative; background: #000;
       height: 450px; min-height: 120px;
@@ -40,7 +40,6 @@
     }
     .pvideo canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
 
-    /* drag handle */
     .resize-handle {
       height: 7px; background: #d8d8d8;
       cursor: ns-resize;
@@ -108,6 +107,7 @@
       <div class="icon">🎬</div>
       <div>動画ファイルを選択 / ドロップ</div>
       <div class="sub">MKV（yt-dlp 形式）· MP4 · WebM</div>
+      <div class="sub2">動画はこの端末に保存され、次回開いたとき自動で読み込まれます</div>
       <div class="fname"  id="vname"></div>
       <div class="status" id="vstatus"></div>
       <input type="file" id="vinput" accept="video/*,.mkv,.webm,.mp4">
@@ -151,7 +151,7 @@
       </div>
     </div>
 
-    <div class="hint">Space: 再生/停止 &nbsp;|&nbsp; ←→: ±5秒 &nbsp;|&nbsp; 動画下端をドラッグでサイズ変更</div>
+    <div class="hint">Space: 再生/停止 &nbsp;|&nbsp; ←→: ±5秒 &nbsp;|&nbsp; 動画下端をドラッグでサイズ変更 &nbsp;|&nbsp; Ctrl+Z: サイズを1つ前に戻す</div>
   </div>
 
   <script>
@@ -168,13 +168,75 @@
   const bdmk   = document.getElementById('bdmk');
   const cinfo  = document.getElementById('cinfo');
   const cactive= document.getElementById('cactive');
+  const drop   = document.getElementById('vdrop');
+  const vinput = document.getElementById('vinput');
+  const vstatus= document.getElementById('vstatus');
+  const vname  = document.getElementById('vname');
 
-  // ── resize handle ────────────────────────────────────────────
+  // ── persisted state (localStorage: playback time + screen size) ────
+  const STATE_KEY = 'danmaku-player-state';
+
+  function savePlayerState() {
+    try {
+      localStorage.setItem(STATE_KEY, JSON.stringify({
+        time:   vid.currentTime || 0,
+        height: pvideo.offsetHeight || null
+      }));
+    } catch (e) {}
+  }
+  function loadPlayerState() {
+    try { return JSON.parse(localStorage.getItem(STATE_KEY) || 'null'); }
+    catch (e) { return null; }
+  }
+
+  // ── video storage (IndexedDB) — remembers the last loaded video file ──
+  const DB_NAME = 'danmaku-player-db', DB_STORE = 'video';
+
+  function openDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(DB_STORE);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror   = () => reject(req.error);
+    });
+  }
+  async function saveVideoToDb(file) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(DB_STORE, 'readwrite');
+      tx.objectStore(DB_STORE).put(file, 'last');
+      tx.oncomplete = () => resolve();
+      tx.onerror    = () => reject(tx.error);
+    });
+  }
+  async function loadVideoFromDb() {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx  = db.transaction(DB_STORE, 'readonly');
+      const req = tx.objectStore(DB_STORE).get('last');
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror   = () => reject(req.error);
+    });
+  }
+
+  // ── resize handle + Ctrl+Z undo history ─────────────────────────
   const rhandle = document.getElementById('rhandle');
   let resizing = false, resizeStartY = 0, resizeStartH = 0;
+  let heightHistory = [];
+
+  function pushHeightHistory(h) {
+    heightHistory.push(h);
+    if (heightHistory.length > 20) heightHistory.shift();
+  }
+  function undoHeight() {
+    if (!heightHistory.length) return;
+    pvideo.style.height = heightHistory.pop() + 'px';
+    savePlayerState();
+  }
 
   function startResize(clientY) {
-    resizing    = true;
+    pushHeightHistory(pvideo.offsetHeight);
+    resizing = true;
     resizeStartY = clientY;
     resizeStartH = pvideo.offsetHeight;
     rhandle.classList.add('dragging');
@@ -183,9 +245,7 @@
   }
   function doResize(clientY) {
     if (!resizing) return;
-    const newH = Math.max(120, resizeStartH + (clientY - resizeStartY));
-    pvideo.style.height = newH + 'px';
-    // canvas is synced by ResizeObserver on vid
+    pvideo.style.height = Math.max(120, resizeStartH + (clientY - resizeStartY)) + 'px';
   }
   function endResize() {
     if (!resizing) return;
@@ -193,12 +253,12 @@
     rhandle.classList.remove('dragging');
     document.body.style.cursor     = '';
     document.body.style.userSelect = '';
+    savePlayerState();
   }
 
   rhandle.addEventListener('mousedown',  e => { e.preventDefault(); startResize(e.clientY); });
   document.addEventListener('mousemove', e => doResize(e.clientY));
   document.addEventListener('mouseup',   endResize);
-
   rhandle.addEventListener('touchstart', e => { e.preventDefault(); startResize(e.touches[0].clientY); }, { passive: false });
   document.addEventListener('touchmove', e => { if (resizing) { e.preventDefault(); doResize(e.touches[0].clientY); } }, { passive: false });
   document.addEventListener('touchend',  endResize);
@@ -294,22 +354,31 @@
     }
   }
 
-  // ── file drop ────────────────────────────────────────────────
-  const drop    = document.getElementById('vdrop');
-  const vinput  = document.getElementById('vinput');
-  const vstatus = document.getElementById('vstatus');
-  const vname   = document.getElementById('vname');
+  // ── loading a video (from drop/picker, or restored from IndexedDB) ──
+  let restoreTime = null;
 
-  async function handleVideoFile(f) {
-    vname.textContent   = f.name;
-    vstatus.textContent = '';
+  async function handleVideoFile(f, opts) {
+    opts = opts || {};
+    const restore = !!opts.restore;
+    const name = f.name || '動画';
+
+    vname.textContent   = name;
+    vstatus.textContent = restore ? '保存されていた動画を読み込み中…' : '';
     drop.classList.add('loaded');
     vid.src = URL.createObjectURL(f);
     ps.classList.add('show');
 
-    const isMkv = f.name.toLowerCase().endsWith('.mkv') || f.type === 'video/x-matroska' || f.type === '';
+    if (restore) {
+      const st = loadPlayerState();
+      restoreTime = st && typeof st.time === 'number' ? st.time : null;
+    } else {
+      restoreTime = null;
+      saveVideoToDb(f).catch(() => {});
+    }
+
+    const isMkv = name.toLowerCase().endsWith('.mkv') || f.type === 'video/x-matroska' || f.type === '';
     if (isMkv) {
-      vstatus.textContent = 'info.json を抽出中…';
+      vstatus.textContent = (restore ? '保存されていた動画を読み込み中… ' : '') + 'info.json を抽出中…';
       try {
         const data = await extractInfoJson(f);
         const raw = extractComments(data);
@@ -333,6 +402,14 @@
   drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); e.dataTransfer.files[0] && handleVideoFile(e.dataTransfer.files[0]); });
   vinput.addEventListener('change',  () => vinput.files[0] && handleVideoFile(vinput.files[0]));
 
+  // Restore last video automatically on page load
+  (async () => {
+    try {
+      const stored = await loadVideoFromDb();
+      if (stored) await handleVideoFile(stored, { restore: true });
+    } catch (e) { /* IndexedDB unavailable or empty — ignore */ }
+  })();
+
   // ── canvas ───────────────────────────────────────────────────
   const BASE = 22, SPEED = 280, FIXED_DUR = 3.5;
   let scrollLanes = [], topLanes = [], botLanes = [];
@@ -350,12 +427,19 @@
   }
   new ResizeObserver(resizeCanvas).observe(vid);
 
-  // Auto-fit height to video aspect ratio on load
+  // Set player height on load: restored size takes priority, else auto-fit to aspect ratio
   vid.addEventListener('loadedmetadata', () => {
-    if (vid.videoWidth && vid.videoHeight) {
+    const state = loadPlayerState();
+    if (state && state.height) {
+      pvideo.style.height = state.height + 'px';
+    } else if (vid.videoWidth && vid.videoHeight) {
       const w = pvideo.offsetWidth;
       const h = Math.round(Math.min(w * vid.videoHeight / vid.videoWidth, window.innerHeight * 0.82));
       pvideo.style.height = h + 'px';
+    }
+    if (restoreTime != null && isFinite(restoreTime)) {
+      vid.currentTime = restoreTime;
+      restoreTime = null;
     }
     updateMax();
   });
@@ -454,18 +538,22 @@
   }
   bplay.addEventListener('click', () => vid.paused ? vid.play() : vid.pause());
   vid.addEventListener('play',  () => { bplay.textContent='⏸'; lastTs=null; });
-  vid.addEventListener('pause', () =>   bplay.textContent='▶');
+  vid.addEventListener('pause', () => { bplay.textContent='▶'; savePlayerState(); });
   vid.addEventListener('ended', () =>   bplay.textContent='▶');
+
+  let lastStateSave = 0;
   vid.addEventListener('timeupdate', () => {
     if (!seekEl._drag) seekEl.value = vid.currentTime;
     tdisp.textContent = fmt(vid.currentTime)+' / '+fmt(vid.duration);
+    const now = Date.now();
+    if (now - lastStateSave > 3000) { lastStateSave = now; savePlayerState(); }
   });
   function updateMax() { seekEl.max = isFinite(vid.duration) ? vid.duration : 0; }
   vid.addEventListener('durationchange', updateMax);
 
   seekEl.addEventListener('mousedown', () => seekEl._drag=true);
   seekEl.addEventListener('input',     () => vid.currentTime=+seekEl.value);
-  seekEl.addEventListener('change',    () => { seekEl._drag=false; vid.currentTime=+seekEl.value; resetDanmaku(); });
+  seekEl.addEventListener('change',    () => { seekEl._drag=false; vid.currentTime=+seekEl.value; resetDanmaku(); savePlayerState(); });
   vid.addEventListener('seeked', resetDanmaku);
 
   document.getElementById('bmute').addEventListener('click', function() {
@@ -479,7 +567,14 @@
     if (!dmkOn) ctx.clearRect(0,0,cvs.width,cvs.height);
   });
 
+  window.addEventListener('beforeunload', savePlayerState);
+
   document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      undoHeight();
+      return;
+    }
     if (e.target.tagName==='INPUT'||e.target.tagName==='SELECT') return;
     if (e.key===' ')           { e.preventDefault(); bplay.click(); }
     else if (e.key==='ArrowLeft')  vid.currentTime=Math.max(0,vid.currentTime-5);
