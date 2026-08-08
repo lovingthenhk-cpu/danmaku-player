@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Danmaku Player</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #f0f0f0;
+      color: #222;
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 13px;
+    }
+    header {
+      background: #fff;
+      border-bottom: 1px solid #ddd;
+      padding: 10px 16px;
+      font-size: 15px;
+      font-weight: 600;
+    }
+    .wrap {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 14px;
+    }
+    .setup {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .drop {
+      background: #fff;
+      border: 2px dashed #ccc;
+      border-radius: 4px;
+      padding: 18px 12px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+      user-select: none;
+    }
+    .drop:hover { border-color: #999; }
+    .drop.over  { border-color: #666; background: #f9f9f9; }
+    .drop.loaded { border-color: #555; border-style: solid; }
+    .drop .icon  { font-size: 24px; margin-bottom: 4px; }
+    .drop .sub   { color: #888; font-size: 11px; margin-top: 3px; }
+    .drop .fname { color: #555; font-size: 11px; margin-top: 4px; word-break: break-all; }
+    input[type="file"] { display: none; }
+
+    .player-section { display: none; }
+    .player-section.show { display: block; }
+
+    .pvideo {
+      position: relative;
+      background: #000;
+      line-height: 0;
+    }
+    .pvideo video {
+      width: 100%;
+      display: block;
+      max-height: 65vh;
+    }
+    .pvideo canvas {
+      position: absolute;
+      top: 0; left: 0;
+      pointer-events: none;
+    }
+
+    .controls {
+      background: #fff;
+      border: 1px solid #ddd;
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .controls button {
+      background: #f0f0f0;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      padding: 3px 9px;
+      cursor: pointer;
+      font-size: 13px;
+      color: #333;
+      line-height: 1.4;
+    }
+    .controls button:hover { background: #e0e0e0; }
+    .controls button.on { background: #333; color: #fff; border-color: #333; }
+    .controls select {
+      background: #f0f0f0;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      padding: 3px 4px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .seek {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    input[type=range] {
+      -webkit-appearance: none;
+      appearance: none;
+      flex: 1;
+      height: 3px;
+      background: #ddd;
+      border-radius: 2px;
+      cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 11px; height: 11px;
+      background: #555;
+      border-radius: 50%;
+    }
+    .time { font-size: 11px; color: #777; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+    .infobar {
+      padding: 6px 0 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 11px;
+      color: #888;
+    }
+    .hint {
+      margin-top: 10px;
+      font-size: 11px;
+      color: #aaa;
+    }
+    .hint code { background: #e8e8e8; padding: 1px 4px; border-radius: 2px; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <header>Danmaku Player</header>
+  <div class="wrap">
+    <div class="setup">
+      <div class="drop" id="vdrop">
+        <div class="icon">🎬</div>
+        <div>動画ファイルを選択 / ドロップ</div>
+        <div class="sub">MKV · MP4 · WebM など</div>
+        <div class="fname" id="vname"></div>
+        <input type="file" id="vinput" accept="video/*,.mkv,.webm,.mp4">
+      </div>
+      <div class="drop" id="jdrop">
+        <div class="icon">💬</div>
+        <div>コメント JSON を選択 / ドロップ</div>
+        <div class="sub">info.json（yt-dlp 形式）またはコメント配列</div>
+        <div class="fname" id="jname"></div>
+        <input type="file" id="jinput" accept=".json,application/json">
+      </div>
+    </div>
+
+    <div class="player-section" id="ps">
+      <div class="pvideo" id="pvideo">
+        <video id="vid" preload="metadata"></video>
+        <canvas id="cvs"></canvas>
+      </div>
+      <div class="controls">
+        <button id="bplay">▶</button>
+        <div class="seek">
+          <input type="range" id="seek" value="0" min="0" step="0.1">
+          <span class="time" id="tdisp">0:00 / 0:00</span>
+        </div>
+        <button id="bmute">🔊</button>
+        <input type="range" id="vol" min="0" max="1" step="0.05" value="1" style="width:55px;flex:none">
+        <select id="spd" title="再生速度">
+          <option value="0.5">×0.5</option>
+          <option value="1" selected>×1</option>
+          <option value="1.25">×1.25</option>
+          <option value="1.5">×1.5</option>
+          <option value="2">×2</option>
+        </select>
+        <button id="bdmk" class="on">弾幕</button>
+      </div>
+      <div class="infobar">
+        <span id="cinfo">コメント: 未読み込み</span>
+        <span id="cactive"></span>
+      </div>
+    </div>
+
+    <div class="hint">
+      Space: 再生/一時停止 &nbsp;|&nbsp; ←→: ±5秒
+    </div>
+  </div>
+
+  <script>
+  'use strict';
+
+  const vid    = document.getElementById('vid');
+  const cvs    = document.getElementById('cvs');
+  const ctx    = cvs.getContext('2d');
+  const ps     = document.getElementById('ps');
+  const bplay  = document.getElementById('bplay');
+  const seekEl = document.getElementById('seek');
+  const tdisp  = document.getElementById('tdisp');
+  const bdmk   = document.getElementById('bdmk');
+  const cinfo  = document.getElementById('cinfo');
+  const cactive= document.getElementById('cactive');
+
+  // ── file drop helper ─────────────────────────────────────────
+  function setupDrop(dropId, inputId, nameId, cb) {
+    const drop = document.getElementById(dropId);
+    const inp  = document.getElementById(inputId);
+    const nm   = document.getElementById(nameId);
+    const handle = f => { nm.textContent = f.name; drop.classList.add('loaded'); cb(f); };
+    drop.addEventListener('click', () => inp.click());
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+    drop.addEventListener('drop', e => {
+      e.preventDefault(); drop.classList.remove('over');
+      e.dataTransfer.files[0] && handle(e.dataTransfer.files[0]);
+    });
+    inp.addEventListener('change', () => inp.files[0] && handle(inp.files[0]));
+  }
+
+  setupDrop('vdrop', 'vinput', 'vname', f => {
+    vid.src = URL.createObjectURL(f);
+    ps.classList.add('show');
+  });
+
+  setupDrop('jdrop', 'jinput', 'jname', f => {
+    const r = new FileReader();
+    r.onload = e => parseJSON(e.target.result);
+    r.readAsText(f, 'utf-8');
+  });
+
+  // ── comment parsing ──────────────────────────────────────────
+  let comments = [];
+
+  function parseJSON(text) {
+    let data;
+    try { data = JSON.parse(text); } catch(e) { alert('JSONパースエラー:\n' + e.message); return; }
+
+    let raw = [];
+    if (Array.isArray(data)) {
+      raw = data;
+    } else if (data.subtitles && typeof data.subtitles === 'object') {
+      // yt-dlp info.json: subtitles.<lang>[0].data = JSON string of comments
+      for (const lang of Object.keys(data.subtitles)) {
+        const entries = data.subtitles[lang];
+        if (!Array.isArray(entries)) continue;
+        for (const entry of entries) {
+          if (typeof entry.data === 'string') {
+            try { raw = JSON.parse(entry.data); } catch(e) {}
+            if (raw.length) break;
+          }
+        }
+        if (raw.length) break;
+      }
+    } else if (typeof data.data === 'string') {
+      try { raw = JSON.parse(data.data); } catch(e) {}
+    }
+
+    if (!raw.length) {
+      alert('コメントが見つかりません。\nyt-dlp の info.json か、コメント配列の JSON をご利用ください。');
+      return;
+    }
+
+    comments = raw
+      .filter(c => c && c.body && typeof c.vposMs === 'number')
+      .filter(c => (c.score || 0) > -2000)   // 大量NG済みは除外
+      .sort((a, b) => a.vposMs - b.vposMs);
+
+    cinfo.textContent = `コメント: ${comments.length.toLocaleString()} 件`;
+    resetDanmaku();
+  }
+
+  // ── canvas resize ────────────────────────────────────────────
+  const BASE      = 22;   // base font size px
+  const SPEED     = 280;  // scroll speed px/sec
+  const FIXED_DUR = 3.5;  // fixed comment duration sec
+
+  let scrollLanes = [], topLanes = [], botLanes = [];
+
+  function resizeCanvas() {
+    cvs.width  = vid.offsetWidth  || 640;
+    cvs.height = vid.offsetHeight || 360;
+    initLanes();
+  }
+
+  function initLanes() {
+    const n = Math.max(1, Math.floor(cvs.height / (BASE + 4)));
+    scrollLanes = new Array(n).fill(0);
+    topLanes    = new Array(Math.max(1, Math.floor(n * 0.45))).fill(0);
+    botLanes    = new Array(Math.max(1, Math.floor(n * 0.45))).fill(0);
+  }
+
+  // Use ResizeObserver for accurate sizing after metadata load
+  const ro = new ResizeObserver(() => resizeCanvas());
+  ro.observe(vid);
+
+  // ── danmaku engine ───────────────────────────────────────────
+  let active  = [];
+  let nextIdx = 0;
+  let dmkOn   = true;
+  let lastTs  = null;
+
+  const COLORS = {
+    white:'#ffffff', red:'#ff5555', pink:'#ff88cc', orange:'#ffaa33',
+    yellow:'#ffee33', green:'#55dd55', cyan:'#44eeff', blue:'#5599ff',
+    purple:'#cc55ff', black:'#444444', maroon:'#cc2222',
+    darkgreen:'#228822', darkblue:'#2255cc'
+  };
+
+  function parseCmd(cmds) {
+    let color = '#ffffff', fs = BASE, pos = 'scroll';
+    for (const c of (cmds || [])) {
+      const k = c.toLowerCase();
+      if (COLORS[k]) { color = COLORS[k]; continue; }
+      if (k === 'big')   { fs = Math.round(BASE * 1.5); continue; }
+      if (k === 'small') { fs = Math.round(BASE * 0.72); continue; }
+      if (k === 'medium'){ fs = BASE; continue; }
+      if (k === 'ue')    { pos = 'top'; continue; }
+      if (k === 'shita') { pos = 'bot'; continue; }
+      if (k === 'naka')  { pos = 'center'; continue; }
+    }
+    return { color, fs, pos };
+  }
+
+  function freeLane(lanes, vt) {
+    for (let i = 0; i < lanes.length; i++) if (lanes[i] <= vt) return i;
+    return Math.floor(Math.random() * lanes.length); // fallback: random lane
+  }
+
+  function activateCmt(c) {
+    const { color, fs, pos } = parseCmd(c.commands);
+    const vt = vid.currentTime;
+    ctx.font = `bold ${fs}px sans-serif`;
+    const w = ctx.measureText(c.body).width;
+    const lh = fs + 4;
+    const a = { body: c.body, color, fs, pos, x: 0, y: 0, vx: 0, expAt: 0, w };
+
+    if (pos === 'scroll') {
+      const li = freeLane(scrollLanes, vt);
+      a.y  = Math.min(li * lh + fs, cvs.height - 4);
+      a.x  = cvs.width;
+      a.vx = -SPEED;
+      a.expAt = vt + (cvs.width + w) / SPEED;
+      // Mark lane busy until leading edge clears the right side
+      scrollLanes[li] = vt + (w + 10) / SPEED;
+    } else if (pos === 'top') {
+      const li = freeLane(topLanes, vt);
+      a.y  = Math.min(li * lh + fs, cvs.height / 2);
+      a.x  = (cvs.width - w) / 2;
+      a.expAt = vt + FIXED_DUR;
+      topLanes[li] = vt + FIXED_DUR;
+    } else if (pos === 'bot') {
+      const li = freeLane(botLanes, vt);
+      a.y  = Math.max(cvs.height - li * lh - 4, fs);
+      a.x  = (cvs.width - w) / 2;
+      a.expAt = vt + FIXED_DUR;
+      botLanes[li] = vt + FIXED_DUR;
+    } else { // center
+      a.y  = cvs.height / 2 + fs / 2;
+      a.x  = (cvs.width - w) / 2;
+      a.expAt = vt + FIXED_DUR;
+    }
+    active.push(a);
+  }
+
+  function resetDanmaku() {
+    active = [];
+    scrollLanes.fill(0);
+    topLanes.fill(0);
+    botLanes.fill(0);
+    lastTs = null;
+    const vt = vid.currentTime;
+    nextIdx = 0;
+    for (let i = 0; i < comments.length; i++) {
+      if (comments[i].vposMs / 1000 >= vt) { nextIdx = i; return; }
+    }
+    nextIdx = comments.length;
+  }
+
+  function tick(ts) {
+    const dt = lastTs === null ? 0 : Math.min((ts - lastTs) / 1000, 0.1);
+    lastTs = ts;
+
+    if (!vid.paused && !vid.ended) {
+      const vt = vid.currentTime;
+      while (nextIdx < comments.length && comments[nextIdx].vposMs / 1000 <= vt)
+        activateCmt(comments[nextIdx++]);
+      for (const a of active) a.x += a.vx * dt;
+    }
+
+    active = active.filter(a =>
+      a.pos === 'scroll' ? a.x + a.w > 0 : vid.currentTime < a.expAt
+    );
+
+    ctx.clearRect(0, 0, cvs.width, cvs.height);
+    if (dmkOn) {
+      ctx.shadowColor = 'rgba(0,0,0,.85)';
+      ctx.shadowBlur  = 3;
+      ctx.shadowOffsetX = 1;
+      ctx.shadowOffsetY = 1;
+      for (const a of active) {
+        ctx.font = `bold ${a.fs}px sans-serif`;
+        ctx.fillStyle = a.color;
+        ctx.fillText(a.body, a.x, a.y);
+      }
+      ctx.shadowBlur = ctx.shadowOffsetX = ctx.shadowOffsetY = 0;
+    }
+
+    cactive.textContent = (dmkOn && active.length)
+      ? `表示中: ${active.length}` : '';
+
+    requestAnimationFrame(tick);
+  }
+
+  requestAnimationFrame(tick);
+
+  // ── video controls ───────────────────────────────────────────
+  function fmt(s) {
+    if (!isFinite(s) || s < 0) s = 0;
+    const m = Math.floor(s / 60);
+    return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  }
+
+  bplay.addEventListener('click', () => {
+    vid.paused ? vid.play() : vid.pause();
+  });
+  vid.addEventListener('play',  () => { bplay.textContent = '⏸'; lastTs = null; });
+  vid.addEventListener('pause', () => { bplay.textContent = '▶'; });
+  vid.addEventListener('ended', () => { bplay.textContent = '▶'; });
+
+  vid.addEventListener('timeupdate', () => {
+    if (!seekEl._drag) seekEl.value = vid.currentTime;
+    tdisp.textContent = fmt(vid.currentTime) + ' / ' + fmt(vid.duration);
+  });
+
+  function updateSeekMax() { seekEl.max = isFinite(vid.duration) ? vid.duration : 0; }
+  vid.addEventListener('durationchange', updateSeekMax);
+  vid.addEventListener('loadedmetadata', updateSeekMax);
+
+  seekEl.addEventListener('mousedown', () => { seekEl._drag = true; });
+  seekEl.addEventListener('input',     () => { vid.currentTime = +seekEl.value; });
+  seekEl.addEventListener('change',    () => {
+    seekEl._drag = false;
+    vid.currentTime = +seekEl.value;
+    resetDanmaku();
+  });
+  vid.addEventListener('seeked', resetDanmaku);
+
+  document.getElementById('bmute').addEventListener('click', function() {
+    vid.muted = !vid.muted;
+    this.textContent = vid.muted ? '🔇' : '🔊';
+  });
+  document.getElementById('vol').addEventListener('input', function() {
+    vid.volume = +this.value;
+  });
+  document.getElementById('spd').addEventListener('change', function() {
+    vid.playbackRate = +this.value;
+  });
+
+  bdmk.addEventListener('click', () => {
+    dmkOn = !dmkOn;
+    bdmk.classList.toggle('on', dmkOn);
+    if (!dmkOn) ctx.clearRect(0, 0, cvs.width, cvs.height);
+  });
+
+  // keyboard shortcuts
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    if (e.key === ' ')           { e.preventDefault(); bplay.click(); }
+    else if (e.key === 'ArrowLeft')  { vid.currentTime = Math.max(0, vid.currentTime - 5); }
+    else if (e.key === 'ArrowRight') { vid.currentTime = Math.min(vid.duration || 0, vid.currentTime + 5); }
+  });
+  </script>
+</body>
+</html>
