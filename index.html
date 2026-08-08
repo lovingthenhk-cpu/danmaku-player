@@ -30,9 +30,10 @@
     .player-section { display: none; }
     .player-section.show { display: block; }
 
+    .presize { position: relative; width: 100%; max-width: 100%; }
     .pvideo {
       position: relative; background: #000;
-      height: 450px; min-height: 120px;
+      height: 450px; min-height: 120px; width: 100%;
     }
     .pvideo video {
       width: 100%; height: 100%;
@@ -40,20 +41,37 @@
     }
     .pvideo canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
 
-    .resize-handle {
+    /* south (height) handle — visible bar under the video */
+    .resize-handle-s {
       height: 7px; background: #d8d8d8;
       cursor: ns-resize;
       display: flex; align-items: center; justify-content: center;
       transition: background .12s;
       touch-action: none;
     }
-    .resize-handle:hover { background: #bbb; }
-    .resize-handle::after {
+    .resize-handle-s:hover { background: #bbb; }
+    .resize-handle-s::after {
       content: ''; display: block;
       width: 32px; height: 2px;
       background: #aaa; border-radius: 1px;
     }
-    .resize-handle.dragging { background: #aaa; }
+    .resize-handle-s.dragging { background: #aaa; }
+
+    /* east (width) handle — invisible strip on the right edge */
+    .resize-handle-e {
+      position: absolute; top: 0; right: -4px; bottom: 7px; width: 8px;
+      cursor: ew-resize; touch-action: none; z-index: 5;
+    }
+    .resize-handle-e:hover, .resize-handle-e.dragging { background: rgba(0,0,0,.12); }
+
+    /* southeast (diagonal) handle — small corner grip */
+    .resize-handle-se {
+      position: absolute; right: -3px; bottom: 0; width: 14px; height: 14px;
+      cursor: nwse-resize; touch-action: none; z-index: 6;
+      background: linear-gradient(135deg, transparent 0 42%, #999 42% 50%, transparent 50% 64%, #999 64% 72%, transparent 72% 100%);
+      opacity: .55;
+    }
+    .resize-handle-se:hover, .resize-handle-se.dragging { opacity: 1; }
 
     .controls {
       background: #fff; border: 1px solid #ddd; border-top: none;
@@ -65,6 +83,7 @@
     }
     .controls button:hover { background: #e0e0e0; }
     .controls button.on { background: #333; color: #fff; border-color: #333; }
+    .controls button:disabled { opacity: .5; cursor: default; }
     .controls select {
       background: #f0f0f0; border: 1px solid #ccc;
       border-radius: 3px; padding: 3px 4px; font-size: 12px; cursor: pointer;
@@ -78,7 +97,7 @@
       -webkit-appearance: none; width: 11px; height: 11px; background: #555; border-radius: 50%;
     }
     .time { font-size: 11px; color: #777; white-space: nowrap; font-variant-numeric: tabular-nums; }
-    .cbar { padding: 5px 0; font-size: 11px; color: #888; display: flex; gap: 10px; }
+    .cbar { padding: 5px 0; font-size: 11px; color: #888; display: flex; gap: 10px; flex-wrap: wrap; }
 
     .meta { background: #fff; border: 1px solid #ddd; border-top: none; padding: 12px 14px; }
     .meta-title { font-size: 15px; font-weight: 600; margin-bottom: 8px; line-height: 1.4; }
@@ -114,11 +133,15 @@
     </div>
 
     <div class="player-section" id="ps">
-      <div class="pvideo" id="pvideo">
-        <video id="vid" preload="metadata"></video>
-        <canvas id="cvs"></canvas>
+      <div class="presize" id="presize">
+        <div class="pvideo" id="pvideo">
+          <video id="vid" preload="metadata"></video>
+          <canvas id="cvs"></canvas>
+        </div>
+        <div class="resize-handle-s"  id="rhandleS"></div>
+        <div class="resize-handle-e"  id="rhandleE"></div>
+        <div class="resize-handle-se" id="rhandleSE"></div>
       </div>
-      <div class="resize-handle" id="rhandle"></div>
       <div class="controls">
         <button id="bplay">▶</button>
         <div class="seek">
@@ -135,10 +158,12 @@
           <option value="2">×2</option>
         </select>
         <button id="bdmk" class="on">弾幕</button>
+        <button id="bencode">コメント付きで書き出す</button>
       </div>
       <div class="cbar">
         <span id="cinfo">コメント: -</span>
         <span id="cactive"></span>
+        <span id="encstatus"></span>
       </div>
       <div class="meta" id="meta" style="display:none">
         <div class="meta-title" id="mtitle"></div>
@@ -151,7 +176,7 @@
       </div>
     </div>
 
-    <div class="hint">Space: 再生/停止 &nbsp;|&nbsp; ←→: ±5秒 &nbsp;|&nbsp; 動画下端をドラッグでサイズ変更 &nbsp;|&nbsp; Ctrl+Z: サイズを1つ前に戻す</div>
+    <div class="hint">Space: 再生/停止 &nbsp;|&nbsp; ←→: ±5秒 &nbsp;|&nbsp; 動画の右端・下端・角をドラッグでサイズ変更 &nbsp;|&nbsp; Ctrl+Z: サイズを1つ前に戻す</div>
   </div>
 
   <script>
@@ -161,26 +186,37 @@
   const cvs    = document.getElementById('cvs');
   const ctx    = cvs.getContext('2d');
   const ps     = document.getElementById('ps');
+  const presize= document.getElementById('presize');
   const pvideo = document.getElementById('pvideo');
   const bplay  = document.getElementById('bplay');
   const seekEl = document.getElementById('seek');
   const tdisp  = document.getElementById('tdisp');
   const bdmk   = document.getElementById('bdmk');
+  const bencode= document.getElementById('bencode');
+  const encstatus = document.getElementById('encstatus');
   const cinfo  = document.getElementById('cinfo');
   const cactive= document.getElementById('cactive');
   const drop   = document.getElementById('vdrop');
   const vinput = document.getElementById('vinput');
   const vstatus= document.getElementById('vstatus');
   const vname  = document.getElementById('vname');
+  const wrapEl = document.querySelector('.wrap');
 
   // ── persisted state (localStorage: playback time + screen size) ────
   const STATE_KEY = 'danmaku-player-state';
+
+  function normalizePx(v) {
+    if (v === null || v === undefined || v === '') return '';
+    if (typeof v === 'number') return v + 'px';
+    return v;
+  }
 
   function savePlayerState() {
     try {
       localStorage.setItem(STATE_KEY, JSON.stringify({
         time:   vid.currentTime || 0,
-        height: pvideo.offsetHeight || null
+        width:  presize.style.width  || '',
+        height: pvideo.style.height  || ''
       }));
     } catch (e) {}
   }
@@ -219,49 +255,71 @@
     });
   }
 
-  // ── resize handle + Ctrl+Z undo history ─────────────────────────
-  const rhandle = document.getElementById('rhandle');
-  let resizing = false, resizeStartY = 0, resizeStartH = 0;
-  let heightHistory = [];
+  // ── resize handles (south / east / southeast) + Ctrl+Z undo history ──
+  const handleS  = document.getElementById('rhandleS');
+  const handleE  = document.getElementById('rhandleE');
+  const handleSE = document.getElementById('rhandleSE');
 
-  function pushHeightHistory(h) {
-    heightHistory.push(h);
-    if (heightHistory.length > 20) heightHistory.shift();
+  let boxHistory = [];
+  function pushBoxHistory() {
+    boxHistory.push({ width: presize.style.width || '', height: pvideo.style.height || '' });
+    if (boxHistory.length > 20) boxHistory.shift();
   }
-  function undoHeight() {
-    if (!heightHistory.length) return;
-    pvideo.style.height = heightHistory.pop() + 'px';
+  function undoBox() {
+    if (!boxHistory.length) return;
+    const snap = boxHistory.pop();
+    presize.style.width  = snap.width;
+    pvideo.style.height  = snap.height;
     savePlayerState();
   }
 
-  function startResize(clientY) {
-    pushHeightHistory(pvideo.offsetHeight);
-    resizing = true;
-    resizeStartY = clientY;
-    resizeStartH = pvideo.offsetHeight;
-    rhandle.classList.add('dragging');
-    document.body.style.cursor     = 'ns-resize';
+  let dragMode = null, dragStartX = 0, dragStartY = 0, dragStartW = 0, dragStartH = 0;
+
+  function beginDrag(mode, x, y) {
+    pushBoxHistory();
+    dragMode = mode;
+    dragStartX = x; dragStartY = y;
+    dragStartW = presize.offsetWidth;
+    dragStartH = pvideo.offsetHeight;
     document.body.style.userSelect = 'none';
+    document.body.style.cursor = mode === 'e' ? 'ew-resize' : mode === 's' ? 'ns-resize' : 'nwse-resize';
+    handleS.classList.toggle('dragging', mode === 's' || mode === 'se');
+    handleE.classList.toggle('dragging', mode === 'e' || mode === 'se');
+    handleSE.classList.toggle('dragging', mode === 'se');
   }
-  function doResize(clientY) {
-    if (!resizing) return;
-    pvideo.style.height = Math.max(120, resizeStartH + (clientY - resizeStartY)) + 'px';
+  function updateDrag(x, y) {
+    if (!dragMode) return;
+    if (dragMode === 's' || dragMode === 'se') {
+      pvideo.style.height = Math.max(120, dragStartH + (y - dragStartY)) + 'px';
+    }
+    if (dragMode === 'e' || dragMode === 'se') {
+      const maxW = wrapEl.clientWidth;
+      const newW = Math.min(maxW, Math.max(200, dragStartW + (x - dragStartX)));
+      presize.style.width = newW + 'px';
+    }
   }
-  function endResize() {
-    if (!resizing) return;
-    resizing = false;
-    rhandle.classList.remove('dragging');
-    document.body.style.cursor     = '';
+  function endDrag() {
+    if (!dragMode) return;
+    dragMode = null;
+    handleS.classList.remove('dragging');
+    handleE.classList.remove('dragging');
+    handleSE.classList.remove('dragging');
+    document.body.style.cursor = '';
     document.body.style.userSelect = '';
     savePlayerState();
   }
 
-  rhandle.addEventListener('mousedown',  e => { e.preventDefault(); startResize(e.clientY); });
-  document.addEventListener('mousemove', e => doResize(e.clientY));
-  document.addEventListener('mouseup',   endResize);
-  rhandle.addEventListener('touchstart', e => { e.preventDefault(); startResize(e.touches[0].clientY); }, { passive: false });
-  document.addEventListener('touchmove', e => { if (resizing) { e.preventDefault(); doResize(e.touches[0].clientY); } }, { passive: false });
-  document.addEventListener('touchend',  endResize);
+  handleS.addEventListener('mousedown',  e => { e.preventDefault(); beginDrag('s',  e.clientX, e.clientY); });
+  handleE.addEventListener('mousedown',  e => { e.preventDefault(); beginDrag('e',  e.clientX, e.clientY); });
+  handleSE.addEventListener('mousedown', e => { e.preventDefault(); beginDrag('se', e.clientX, e.clientY); });
+  document.addEventListener('mousemove', e => updateDrag(e.clientX, e.clientY));
+  document.addEventListener('mouseup',   endDrag);
+
+  handleS.addEventListener('touchstart',  e => { e.preventDefault(); const t=e.touches[0]; beginDrag('s',  t.clientX, t.clientY); }, { passive: false });
+  handleE.addEventListener('touchstart',  e => { e.preventDefault(); const t=e.touches[0]; beginDrag('e',  t.clientX, t.clientY); }, { passive: false });
+  handleSE.addEventListener('touchstart', e => { e.preventDefault(); const t=e.touches[0]; beginDrag('se', t.clientX, t.clientY); }, { passive: false });
+  document.addEventListener('touchmove', e => { if (dragMode) { e.preventDefault(); const t=e.touches[0]; updateDrag(t.clientX, t.clientY); } }, { passive: false });
+  document.addEventListener('touchend',  endDrag);
 
   // ── MKV attachment extractor ─────────────────────────────────
   async function extractInfoJson(file) {
@@ -410,7 +468,7 @@
     } catch (e) { /* IndexedDB unavailable or empty — ignore */ }
   })();
 
-  // ── canvas ───────────────────────────────────────────────────
+  // ── canvas (display / live preview) ─────────────────────────────
   const BASE = 22, SPEED = 280, FIXED_DUR = 3.5;
   let scrollLanes = [], topLanes = [], botLanes = [];
 
@@ -427,13 +485,16 @@
   }
   new ResizeObserver(resizeCanvas).observe(vid);
 
-  // Set player height on load: restored size takes priority, else auto-fit to aspect ratio
+  // Set player size on load: restored size takes priority, else auto-fit to aspect ratio
   vid.addEventListener('loadedmetadata', () => {
     const state = loadPlayerState();
-    if (state && state.height) {
-      pvideo.style.height = state.height + 'px';
+    const savedW = state ? normalizePx(state.width)  : '';
+    const savedH = state ? normalizePx(state.height) : '';
+    if (savedW) presize.style.width = savedW;
+    if (savedH) {
+      pvideo.style.height = savedH;
     } else if (vid.videoWidth && vid.videoHeight) {
-      const w = pvideo.offsetWidth;
+      const w = presize.offsetWidth;
       const h = Math.round(Math.min(w * vid.videoHeight / vid.videoWidth, window.innerHeight * 0.82));
       pvideo.style.height = h + 'px';
     }
@@ -444,9 +505,7 @@
     updateMax();
   });
 
-  // ── danmaku ──────────────────────────────────────────────────
-  let active = [], nextIdx = 0, dmkOn = true, lastTs = null;
-
+  // ── danmaku helpers (shared by live preview and export) ─────────
   const COLORS = {
     white:'#ffffff', red:'#ff5555', pink:'#ff88cc', orange:'#ffaa33',
     yellow:'#ffee33', green:'#55dd55', cyan:'#44eeff', blue:'#5599ff',
@@ -473,6 +532,9 @@
     for (let i = 0; i < lanes.length; i++) if (lanes[i] <= vt) return i;
     return Math.floor(Math.random() * lanes.length);
   }
+
+  // ── live preview danmaku engine (drawn on the overlay canvas) ────
+  let active = [], nextIdx = 0, dmkOn = true, lastTs = null;
 
   function activateCmt(c) {
     const { color, fs, pos } = parseCmd(c.commands);
@@ -514,7 +576,7 @@
   function tick(ts) {
     const dt = lastTs === null ? 0 : Math.min((ts-lastTs)/1000, 0.1);
     lastTs = ts;
-    if (!vid.paused && !vid.ended) {
+    if (!vid.paused && !vid.ended && !isEncoding) {
       const vt = vid.currentTime;
       while (nextIdx < comments.length && comments[nextIdx].vposMs/1000 <= vt) activateCmt(comments[nextIdx++]);
       for (const a of active) a.x += a.vx*dt;
@@ -572,7 +634,7 @@
   document.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
       e.preventDefault();
-      undoHeight();
+      undoBox();
       return;
     }
     if (e.target.tagName==='INPUT'||e.target.tagName==='SELECT') return;
@@ -580,6 +642,166 @@
     else if (e.key==='ArrowLeft')  vid.currentTime=Math.max(0,vid.currentTime-5);
     else if (e.key==='ArrowRight') vid.currentTime=Math.min(vid.duration||0,vid.currentTime+5);
   });
+
+  // ── encode: burn comments into the video and download ───────────
+  let isEncoding = false;
+
+  function encCreateState(w, h, scale) {
+    const n = Math.max(1, Math.floor(h / ((BASE*scale) + 4)));
+    return {
+      w, h, scale,
+      scrollLanes: new Array(n).fill(0),
+      topLanes:    new Array(Math.max(1, Math.floor(n*0.45))).fill(0),
+      botLanes:    new Array(Math.max(1, Math.floor(n*0.45))).fill(0),
+      active: [], nextIdx: 0
+    };
+  }
+  function encActivate(st, c, vt, cctx2) {
+    const { color, fs: fs0, pos } = parseCmd(c.commands);
+    const fs = Math.round(fs0 * st.scale);
+    const spd = SPEED * st.scale;
+    cctx2.font = `bold ${fs}px sans-serif`;
+    const w = cctx2.measureText(c.body).width;
+    const lh = fs + 4;
+    const a = { body: c.body, color, fs, pos, x: 0, y: 0, vx: 0, expAt: 0, w };
+    if (pos === 'scroll') {
+      const li = freeLane(st.scrollLanes, vt);
+      a.y = Math.min(li*lh+fs, st.h-4); a.x = st.w; a.vx = -spd;
+      a.expAt = vt + (st.w+w)/spd;
+      st.scrollLanes[li] = vt + (w+10)/spd;
+    } else if (pos === 'top') {
+      const li = freeLane(st.topLanes, vt);
+      a.y = Math.min(li*lh+fs, st.h/2); a.x = (st.w-w)/2;
+      a.expAt = vt+FIXED_DUR; st.topLanes[li] = a.expAt;
+    } else if (pos === 'bot') {
+      const li = freeLane(st.botLanes, vt);
+      a.y = Math.max(st.h-li*lh-4, fs); a.x = (st.w-w)/2;
+      a.expAt = vt+FIXED_DUR; st.botLanes[li] = a.expAt;
+    } else {
+      a.y = st.h/2+fs/2; a.x = (st.w-w)/2; a.expAt = vt+FIXED_DUR;
+    }
+    st.active.push(a);
+  }
+  function encStep(st, vt, dt, cctx2) {
+    while (st.nextIdx < comments.length && comments[st.nextIdx].vposMs/1000 <= vt) {
+      encActivate(st, comments[st.nextIdx], vt, cctx2);
+      st.nextIdx++;
+    }
+    const spd = SPEED * st.scale;
+    for (const a of st.active) if (a.pos === 'scroll') a.x -= spd*dt;
+    st.active = st.active.filter(a => a.pos==='scroll' ? a.x+a.w>0 : vt < a.expAt);
+
+    cctx2.shadowColor = 'rgba(0,0,0,.85)';
+    cctx2.shadowBlur = 3 * st.scale;
+    cctx2.shadowOffsetX = cctx2.shadowOffsetY = 1 * st.scale;
+    for (const a of st.active) { cctx2.font = `bold ${a.fs}px sans-serif`; cctx2.fillStyle = a.color; cctx2.fillText(a.body, a.x, a.y); }
+    cctx2.shadowBlur = cctx2.shadowOffsetX = cctx2.shadowOffsetY = 0;
+  }
+
+  function updateEncodeUI(on) {
+    bencode.disabled = on;
+    bencode.textContent = on ? 'エンコード中…' : 'コメント付きで書き出す';
+    seekEl.disabled = on;
+    bplay.disabled = on;
+    if (!on) encstatus.textContent = '';
+  }
+
+  async function encodeWithComments() {
+    if (isEncoding) return;
+    if (!vid.src || !isFinite(vid.duration) || vid.duration <= 0) {
+      alert('先に動画を読み込んでください');
+      return;
+    }
+    if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) {
+      alert('このブラウザはエンコード機能に対応していません（Chrome を推奨します）');
+      return;
+    }
+
+    isEncoding = true;
+    updateEncodeUI(true);
+
+    const outW = vid.videoWidth  || 1280;
+    const outH = vid.videoHeight || 720;
+    const scale = outH / 480;
+
+    const composeCanvas = document.createElement('canvas');
+    composeCanvas.width = outW; composeCanvas.height = outH;
+    const cctx2 = composeCanvas.getContext('2d');
+
+    let audioTracks = [];
+    try {
+      const ms = vid.captureStream ? vid.captureStream() : (vid.mozCaptureStream ? vid.mozCaptureStream() : null);
+      if (ms) audioTracks = ms.getAudioTracks();
+    } catch (e) {}
+
+    const fps = 30;
+    const videoTrack = composeCanvas.captureStream(fps).getVideoTracks()[0];
+    const outStream = new MediaStream([videoTrack, ...audioTracks]);
+
+    const mimeCandidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+    const mimeType = mimeCandidates.find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+    const recorder = new MediaRecorder(outStream, { mimeType, videoBitsPerSecond: 8000000 });
+    const chunks = [];
+    recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+
+    const wasPaused = vid.paused, wasMuted = vid.muted, prevTime = vid.currentTime, prevRate = vid.playbackRate;
+
+    vid.pause();
+    await new Promise(r => { vid.currentTime = 0; const h = () => { vid.removeEventListener('seeked', h); r(); }; vid.addEventListener('seeked', h); });
+    vid.playbackRate = 1;
+
+    const st = encCreateState(outW, outH, scale);
+    let lastPerf = performance.now();
+    let rafId = null;
+
+    function frameLoop() {
+      const now = performance.now();
+      const dt = (now - lastPerf) / 1000;
+      lastPerf = now;
+      const vt = vid.currentTime;
+
+      cctx2.drawImage(vid, 0, 0, outW, outH);
+      encStep(st, vt, dt, cctx2);
+
+      encstatus.textContent = `エンコード中: ${fmt(vt)} / ${fmt(vid.duration)}`;
+      rafId = requestAnimationFrame(frameLoop);
+    }
+
+    recorder.start(250);
+    vid.play();
+    rafId = requestAnimationFrame(frameLoop);
+
+    await new Promise(resolve => {
+      vid.addEventListener('ended', function onEnded() {
+        vid.removeEventListener('ended', onEnded);
+        resolve();
+      });
+    });
+
+    cancelAnimationFrame(rafId);
+    recorder.stop();
+    const blob = await new Promise(resolve => { recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType })); });
+
+    vid.currentTime = prevTime;
+    vid.playbackRate = prevRate;
+    vid.muted = wasMuted;
+    if (!wasPaused) vid.play();
+    resetDanmaku();
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (vname.textContent || 'video').replace(/\.[^.]+$/, '') + '_danmaku.webm';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+
+    isEncoding = false;
+    updateEncodeUI(false);
+  }
+
+  bencode.addEventListener('click', encodeWithComments);
   </script>
 </body>
 </html>
