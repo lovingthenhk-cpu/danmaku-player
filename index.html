@@ -11,100 +11,86 @@
 
     .wrap { max-width: 920px; margin: 0 auto; padding: 14px; }
 
-    /* Drop zone */
     .drop {
-      background: #fff;
-      border: 2px dashed #ccc;
-      border-radius: 4px;
-      padding: 24px 16px;
-      text-align: center;
-      cursor: pointer;
+      background: #fff; border: 2px dashed #ccc; border-radius: 4px;
+      padding: 24px 16px; text-align: center; cursor: pointer;
       transition: border-color .15s, background .15s;
-      user-select: none;
-      margin-bottom: 12px;
+      user-select: none; margin-bottom: 12px;
     }
-    .drop:hover   { border-color: #999; }
-    .drop.over    { border-color: #666; background: #f9f9f9; }
-    .drop.loaded  { border-color: #555; border-style: solid; }
-    .drop .icon   { font-size: 26px; margin-bottom: 4px; }
-    .drop .sub    { color: #888; font-size: 11px; margin-top: 3px; }
-    .drop .fname  { color: #555; font-size: 11px; margin-top: 5px; word-break: break-all; }
-    .drop .status { color: #888; font-size: 11px; margin-top: 4px; }
+    .drop:hover  { border-color: #999; }
+    .drop.over   { border-color: #666; background: #f9f9f9; }
+    .drop.loaded { border-color: #555; border-style: solid; }
+    .drop .icon  { font-size: 26px; margin-bottom: 4px; }
+    .drop .sub   { color: #888; font-size: 11px; margin-top: 3px; }
+    .drop .fname { color: #555; font-size: 11px; margin-top: 5px; word-break: break-all; }
+    .drop .status{ color: #888; font-size: 11px; margin-top: 4px; }
     input[type="file"] { display: none; }
 
-    /* Player */
     .player-section { display: none; }
     .player-section.show { display: block; }
 
-    .pvideo { position: relative; background: #000; line-height: 0; }
-    .pvideo video { width: 100%; display: block; max-height: 65vh; }
+    /* video wrapper — height is set by JS, drag handle resizes it */
+    .pvideo {
+      position: relative; background: #000;
+      height: 450px; min-height: 120px;
+    }
+    .pvideo video {
+      width: 100%; height: 100%;
+      display: block; object-fit: contain;
+    }
     .pvideo canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
 
+    /* drag handle */
+    .resize-handle {
+      height: 7px; background: #d8d8d8;
+      cursor: ns-resize;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .12s;
+      touch-action: none;
+    }
+    .resize-handle:hover { background: #bbb; }
+    .resize-handle::after {
+      content: ''; display: block;
+      width: 32px; height: 2px;
+      background: #aaa; border-radius: 1px;
+    }
+    .resize-handle.dragging { background: #aaa; }
+
     .controls {
-      background: #fff;
-      border: 1px solid #ddd;
-      border-top: none;
-      padding: 8px 10px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
+      background: #fff; border: 1px solid #ddd; border-top: none;
+      padding: 8px 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
     }
     .controls button {
-      background: #f0f0f0;
-      border: 1px solid #ccc;
-      border-radius: 3px;
-      padding: 3px 9px;
-      cursor: pointer;
-      font-size: 13px;
-      color: #333;
-      line-height: 1.4;
+      background: #f0f0f0; border: 1px solid #ccc; border-radius: 3px;
+      padding: 3px 9px; cursor: pointer; font-size: 13px; color: #333; line-height: 1.4;
     }
     .controls button:hover { background: #e0e0e0; }
     .controls button.on { background: #333; color: #fff; border-color: #333; }
     .controls select {
       background: #f0f0f0; border: 1px solid #ccc;
-      border-radius: 3px; padding: 3px 4px;
-      font-size: 12px; cursor: pointer;
+      border-radius: 3px; padding: 3px 4px; font-size: 12px; cursor: pointer;
     }
     .seek { flex: 1; display: flex; align-items: center; gap: 6px; }
     input[type=range] {
       -webkit-appearance: none; appearance: none;
-      flex: 1; height: 3px; background: #ddd;
-      border-radius: 2px; cursor: pointer;
+      flex: 1; height: 3px; background: #ddd; border-radius: 2px; cursor: pointer;
     }
     input[type=range]::-webkit-slider-thumb {
-      -webkit-appearance: none; width: 11px; height: 11px;
-      background: #555; border-radius: 50%;
+      -webkit-appearance: none; width: 11px; height: 11px; background: #555; border-radius: 50%;
     }
     .time { font-size: 11px; color: #777; white-space: nowrap; font-variant-numeric: tabular-nums; }
-
     .cbar { padding: 5px 0; font-size: 11px; color: #888; display: flex; gap: 10px; }
 
-    /* Metadata */
-    .meta {
-      background: #fff;
-      border: 1px solid #ddd;
-      border-top: none;
-      padding: 12px 14px;
-    }
+    .meta { background: #fff; border: 1px solid #ddd; border-top: none; padding: 12px 14px; }
     .meta-title { font-size: 15px; font-weight: 600; margin-bottom: 8px; line-height: 1.4; }
-    .meta-stats {
-      display: flex; flex-wrap: wrap; gap: 4px 16px;
-      font-size: 12px; color: #666; margin-bottom: 9px;
-    }
+    .meta-stats { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: #666; margin-bottom: 9px; }
     .meta-stats strong { color: #333; }
     .meta-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 9px; }
-    .tag {
-      background: #eee; border-radius: 10px;
-      padding: 2px 8px; font-size: 11px; color: #555;
-    }
-    .desc-wrap { position: relative; }
+    .tag { background: #eee; border-radius: 10px; padding: 2px 8px; font-size: 11px; color: #555; }
     .desc-text {
       font-size: 12px; color: #555; line-height: 1.65;
       white-space: pre-wrap; word-break: break-word;
-      max-height: 64px; overflow: hidden;
-      transition: max-height .25s ease;
+      max-height: 64px; overflow: hidden; transition: max-height .25s ease;
     }
     .desc-text.expanded { max-height: none; }
     .desc-toggle {
@@ -112,14 +98,12 @@
       background: none; border: none; color: #888; font-size: 11px;
       cursor: pointer; padding: 0; text-decoration: underline;
     }
-
     .hint { margin-top: 8px; font-size: 11px; color: #bbb; }
   </style>
 </head>
 <body>
   <header>Danmaku Player</header>
   <div class="wrap">
-
     <div class="drop" id="vdrop">
       <div class="icon">🎬</div>
       <div>動画ファイルを選択 / ドロップ</div>
@@ -134,6 +118,7 @@
         <video id="vid" preload="metadata"></video>
         <canvas id="cvs"></canvas>
       </div>
+      <div class="resize-handle" id="rhandle"></div>
       <div class="controls">
         <button id="bplay">▶</button>
         <div class="seek">
@@ -157,16 +142,16 @@
       </div>
       <div class="meta" id="meta" style="display:none">
         <div class="meta-title" id="mtitle"></div>
-        <div class="meta-stats" id="mstats"></div>
-        <div class="meta-tags" id="mtags"></div>
-        <div class="desc-wrap">
-          <div class="desc-text" id="mdesc"></div>
+        <div class="meta-stats"  id="mstats"></div>
+        <div class="meta-tags"   id="mtags"></div>
+        <div>
+          <div class="desc-text"   id="mdesc"></div>
           <button class="desc-toggle" id="dtoggle" style="display:none">もっと見る</button>
         </div>
       </div>
     </div>
 
-    <div class="hint">Space: 再生/一時停止 &nbsp;|&nbsp; ←→: ±5秒</div>
+    <div class="hint">Space: 再生/停止 &nbsp;|&nbsp; ←→: ±5秒 &nbsp;|&nbsp; 動画下端をドラッグでサイズ変更</div>
   </div>
 
   <script>
@@ -176,6 +161,7 @@
   const cvs    = document.getElementById('cvs');
   const ctx    = cvs.getContext('2d');
   const ps     = document.getElementById('ps');
+  const pvideo = document.getElementById('pvideo');
   const bplay  = document.getElementById('bplay');
   const seekEl = document.getElementById('seek');
   const tdisp  = document.getElementById('tdisp');
@@ -183,49 +169,72 @@
   const cinfo  = document.getElementById('cinfo');
   const cactive= document.getElementById('cactive');
 
+  // ── resize handle ────────────────────────────────────────────
+  const rhandle = document.getElementById('rhandle');
+  let resizing = false, resizeStartY = 0, resizeStartH = 0;
+
+  function startResize(clientY) {
+    resizing    = true;
+    resizeStartY = clientY;
+    resizeStartH = pvideo.offsetHeight;
+    rhandle.classList.add('dragging');
+    document.body.style.cursor     = 'ns-resize';
+    document.body.style.userSelect = 'none';
+  }
+  function doResize(clientY) {
+    if (!resizing) return;
+    const newH = Math.max(120, resizeStartH + (clientY - resizeStartY));
+    pvideo.style.height = newH + 'px';
+    // canvas is synced by ResizeObserver on vid
+  }
+  function endResize() {
+    if (!resizing) return;
+    resizing = false;
+    rhandle.classList.remove('dragging');
+    document.body.style.cursor     = '';
+    document.body.style.userSelect = '';
+  }
+
+  rhandle.addEventListener('mousedown',  e => { e.preventDefault(); startResize(e.clientY); });
+  document.addEventListener('mousemove', e => doResize(e.clientY));
+  document.addEventListener('mouseup',   endResize);
+
+  rhandle.addEventListener('touchstart', e => { e.preventDefault(); startResize(e.touches[0].clientY); }, { passive: false });
+  document.addEventListener('touchmove', e => { if (resizing) { e.preventDefault(); doResize(e.touches[0].clientY); } }, { passive: false });
+  document.addEventListener('touchend',  endResize);
+
   // ── MKV attachment extractor ─────────────────────────────────
   async function extractInfoJson(file) {
-    // Attachment (info.json, ~1.2MB) lives in the first few MB of the MKV.
-    // Strategy: read first 5MB, find "application/json" marker,
-    // then locate the JSON object that follows.
     const CHUNK = 5 * 1024 * 1024;
     const buf   = await file.slice(0, Math.min(file.size, CHUNK)).arrayBuffer();
     const bytes = new Uint8Array(buf);
-
     const needle = new TextEncoder().encode('application/json');
 
-    // Find "application/json"
     let markerEnd = -1;
     outer: for (let i = 0; i < bytes.length - needle.length; i++) {
-      for (let j = 0; j < needle.length; j++) {
-        if (bytes[i + j] !== needle[j]) continue outer;
-      }
-      markerEnd = i + needle.length;
-      break;
+      for (let j = 0; j < needle.length; j++) { if (bytes[i+j] !== needle[j]) continue outer; }
+      markerEnd = i + needle.length; break;
     }
     if (markerEnd === -1) throw new Error('info.json アタッチメントが MKV 内に見つかりません');
 
-    // Find `{"` — start of JSON object (robust vs. EBML size bytes)
     let jsonStart = -1;
     for (let i = markerEnd; i < bytes.length - 1; i++) {
-      if (bytes[i] === 0x7B && bytes[i + 1] === 0x22) { jsonStart = i; break; }
+      if (bytes[i] === 0x7B && bytes[i+1] === 0x22) { jsonStart = i; break; }
     }
     if (jsonStart === -1) throw new Error('JSON データが見つかりません');
 
-    // Walk balanced braces to find end of JSON
     let depth = 0, inStr = false, esc = false, jsonEnd = -1;
     for (let i = jsonStart; i < bytes.length; i++) {
       const b = bytes[i];
       if (esc)              { esc = false; continue; }
-      if (b === 0x5C && inStr) { esc = true;  continue; }
-      if (b === 0x22)       { inStr = !inStr;  continue; }
+      if (b === 0x5C && inStr) { esc = true; continue; }
+      if (b === 0x22)       { inStr = !inStr; continue; }
       if (!inStr) {
         if      (b === 0x7B) depth++;
         else if (b === 0x7D) { if (--depth === 0) { jsonEnd = i; break; } }
       }
     }
-    if (jsonEnd === -1) throw new Error('JSON の終端が見つかりません（チャンクサイズ不足の可能性）');
-
+    if (jsonEnd === -1) throw new Error('JSON の終端が見つかりません');
     return JSON.parse(new TextDecoder().decode(bytes.subarray(jsonStart, jsonEnd + 1)));
   }
 
@@ -251,45 +260,37 @@
   // ── metadata display ─────────────────────────────────────────
   function showMeta(data) {
     document.getElementById('meta').style.display = '';
-
     document.getElementById('mtitle').textContent = data.title || data.fulltitle || '';
 
-    // Stats
-    const fmtNum = n => n != null ? Number(n).toLocaleString('ja-JP') : '-';
-    const fmtDate = s => s ? `${s.slice(0,4)}/${s.slice(4,6)}/${s.slice(6,8)}` : '-';
-
+    const fmtNum  = n => n != null ? Number(n).toLocaleString('ja-JP') : null;
+    const fmtDate = s => s ? `${s.slice(0,4)}/${s.slice(4,6)}/${s.slice(6,8)}` : null;
     const stats = [
-      ['再生', fmtNum(data.view_count)],
+      ['再生',   fmtNum(data.view_count)],
       ['高評価', fmtNum(data.like_count)],
-      ['コメント', fmtNum(data.comment_count)],
+      ['コメント',fmtNum(data.comment_count)],
       ['投稿日', fmtDate(data.upload_date)],
-      ['長さ', data.duration_string || '-'],
-      ['投稿者', data.channel || data.uploader || '-'],
-      ['ジャンル', data.genre || '-'],
+      ['長さ',   data.duration_string || null],
+      ['投稿者', data.channel || data.uploader || null],
+      ['ジャンル',data.genre || null],
     ];
-    const statsEl = document.getElementById('mstats');
-    statsEl.innerHTML = stats
-      .filter(([,v]) => v && v !== '-')
-      .map(([k,v]) => `<span>${k}: <strong>${v}</strong></span>`)
-      .join('');
+    document.getElementById('mstats').innerHTML = stats
+      .filter(([,v]) => v).map(([k,v]) => `<span>${k}: <strong>${v}</strong></span>`).join('');
 
-    // Tags
     const tags = data.tags || [];
     const tagsEl = document.getElementById('mtags');
     tagsEl.innerHTML = tags.map(t => `<span class="tag">${t}</span>`).join('');
-    if (!tags.length) tagsEl.style.display = 'none';
+    tagsEl.style.display = tags.length ? '' : 'none';
 
-    // Description
     const desc = data.description || '';
     const descEl = document.getElementById('mdesc');
     descEl.textContent = desc;
     const toggle = document.getElementById('dtoggle');
     if (desc.length > 150) {
       toggle.style.display = '';
-      toggle.addEventListener('click', () => {
+      toggle.onclick = () => {
         const ex = descEl.classList.toggle('expanded');
         toggle.textContent = ex ? '閉じる' : 'もっと見る';
-      });
+      };
     }
   }
 
@@ -300,18 +301,17 @@
   const vname   = document.getElementById('vname');
 
   async function handleVideoFile(f) {
-    vname.textContent  = f.name;
+    vname.textContent   = f.name;
     vstatus.textContent = '';
     drop.classList.add('loaded');
     vid.src = URL.createObjectURL(f);
     ps.classList.add('show');
 
-    if (f.name.toLowerCase().endsWith('.mkv') || f.type === 'video/x-matroska' || f.type === '') {
+    const isMkv = f.name.toLowerCase().endsWith('.mkv') || f.type === 'video/x-matroska' || f.type === '';
+    if (isMkv) {
       vstatus.textContent = 'info.json を抽出中…';
       try {
         const data = await extractInfoJson(f);
-
-        // Comments
         const raw = extractComments(data);
         comments = raw
           .filter(c => c && c.body && typeof c.vposMs === 'number')
@@ -320,8 +320,6 @@
         cinfo.textContent = `コメント: ${comments.length.toLocaleString()} 件`;
         resetDanmaku();
         vstatus.textContent = `コメント ${comments.length.toLocaleString()} 件を抽出しました`;
-
-        // Metadata
         showMeta(data);
       } catch(e) {
         vstatus.textContent = '⚠ ' + e.message;
@@ -332,17 +330,11 @@
   drop.addEventListener('click',     () => vinput.click());
   drop.addEventListener('dragover',  e  => { e.preventDefault(); drop.classList.add('over'); });
   drop.addEventListener('dragleave', ()  => drop.classList.remove('over'));
-  drop.addEventListener('drop', e => {
-    e.preventDefault(); drop.classList.remove('over');
-    e.dataTransfer.files[0] && handleVideoFile(e.dataTransfer.files[0]);
-  });
-  vinput.addEventListener('change', () => vinput.files[0] && handleVideoFile(vinput.files[0]));
+  drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); e.dataTransfer.files[0] && handleVideoFile(e.dataTransfer.files[0]); });
+  vinput.addEventListener('change',  () => vinput.files[0] && handleVideoFile(vinput.files[0]));
 
-  // ── canvas / lanes ───────────────────────────────────────────
-  const BASE      = 22;
-  const SPEED     = 280;
-  const FIXED_DUR = 3.5;
-
+  // ── canvas ───────────────────────────────────────────────────
+  const BASE = 22, SPEED = 280, FIXED_DUR = 3.5;
   let scrollLanes = [], topLanes = [], botLanes = [];
 
   function resizeCanvas() {
@@ -358,11 +350,18 @@
   }
   new ResizeObserver(resizeCanvas).observe(vid);
 
+  // Auto-fit height to video aspect ratio on load
+  vid.addEventListener('loadedmetadata', () => {
+    if (vid.videoWidth && vid.videoHeight) {
+      const w = pvideo.offsetWidth;
+      const h = Math.round(Math.min(w * vid.videoHeight / vid.videoWidth, window.innerHeight * 0.82));
+      pvideo.style.height = h + 'px';
+    }
+    updateMax();
+  });
+
   // ── danmaku ──────────────────────────────────────────────────
-  let active  = [];
-  let nextIdx = 0;
-  let dmkOn   = true;
-  let lastTs  = null;
+  let active = [], nextIdx = 0, dmkOn = true, lastTs = null;
 
   const COLORS = {
     white:'#ffffff', red:'#ff5555', pink:'#ff88cc', orange:'#ffaa33',
@@ -375,13 +374,13 @@
     let color = '#ffffff', fs = BASE, pos = 'scroll';
     for (const c of (cmds || [])) {
       const k = c.toLowerCase();
-      if (COLORS[k])    color = COLORS[k];
-      else if (k==='big')   fs = Math.round(BASE*1.5);
-      else if (k==='small') fs = Math.round(BASE*0.72);
-      else if (k==='medium')fs = BASE;
-      else if (k==='ue')    pos = 'top';
-      else if (k==='shita') pos = 'bot';
-      else if (k==='naka')  pos = 'center';
+      if (COLORS[k])     color = COLORS[k];
+      else if (k==='big')    fs = Math.round(BASE*1.5);
+      else if (k==='small')  fs = Math.round(BASE*0.72);
+      else if (k==='medium') fs = BASE;
+      else if (k==='ue')     pos = 'top';
+      else if (k==='shita')  pos = 'bot';
+      else if (k==='naka')   pos = 'center';
     }
     return { color, fs, pos };
   }
@@ -395,119 +394,96 @@
     const { color, fs, pos } = parseCmd(c.commands);
     const vt = vid.currentTime;
     ctx.font = `bold ${fs}px sans-serif`;
-    const w  = ctx.measureText(c.body).width;
+    const w = ctx.measureText(c.body).width;
     const lh = fs + 4;
-    const a  = { body: c.body, color, fs, pos, x: 0, y: 0, vx: 0, expAt: 0, w };
+    const a = { body: c.body, color, fs, pos, x: 0, y: 0, vx: 0, expAt: 0, w };
 
     if (pos === 'scroll') {
       const li = freeLane(scrollLanes, vt);
-      a.y  = Math.min(li * lh + fs, cvs.height - 4);
-      a.x  = cvs.width;
-      a.vx = -SPEED;
-      a.expAt = vt + (cvs.width + w) / SPEED;
-      scrollLanes[li] = vt + (w + 10) / SPEED;
+      a.y = Math.min(li*lh+fs, cvs.height-4); a.x = cvs.width; a.vx = -SPEED;
+      a.expAt = vt + (cvs.width+w)/SPEED;
+      scrollLanes[li] = vt + (w+10)/SPEED;
     } else if (pos === 'top') {
       const li = freeLane(topLanes, vt);
-      a.y  = Math.min(li * lh + fs, cvs.height / 2);
-      a.x  = (cvs.width - w) / 2;
-      a.expAt = vt + FIXED_DUR;
-      topLanes[li] = vt + FIXED_DUR;
+      a.y = Math.min(li*lh+fs, cvs.height/2); a.x = (cvs.width-w)/2;
+      a.expAt = vt+FIXED_DUR; topLanes[li] = a.expAt;
     } else if (pos === 'bot') {
       const li = freeLane(botLanes, vt);
-      a.y  = Math.max(cvs.height - li * lh - 4, fs);
-      a.x  = (cvs.width - w) / 2;
-      a.expAt = vt + FIXED_DUR;
-      botLanes[li] = vt + FIXED_DUR;
+      a.y = Math.max(cvs.height-li*lh-4, fs); a.x = (cvs.width-w)/2;
+      a.expAt = vt+FIXED_DUR; botLanes[li] = a.expAt;
     } else {
-      a.y  = cvs.height / 2 + fs / 2;
-      a.x  = (cvs.width - w) / 2;
-      a.expAt = vt + FIXED_DUR;
+      a.y = cvs.height/2+fs/2; a.x = (cvs.width-w)/2; a.expAt = vt+FIXED_DUR;
     }
     active.push(a);
   }
 
   function resetDanmaku() {
-    active = []; scrollLanes.fill(0); topLanes.fill(0); botLanes.fill(0);
-    lastTs = null;
+    active = []; scrollLanes.fill(0); topLanes.fill(0); botLanes.fill(0); lastTs = null;
     const vt = vid.currentTime;
     nextIdx = 0;
     for (let i = 0; i < comments.length; i++) {
-      if (comments[i].vposMs / 1000 >= vt) { nextIdx = i; return; }
+      if (comments[i].vposMs/1000 >= vt) { nextIdx = i; return; }
     }
     nextIdx = comments.length;
   }
 
   function tick(ts) {
-    const dt = lastTs === null ? 0 : Math.min((ts - lastTs) / 1000, 0.1);
+    const dt = lastTs === null ? 0 : Math.min((ts-lastTs)/1000, 0.1);
     lastTs = ts;
-
     if (!vid.paused && !vid.ended) {
       const vt = vid.currentTime;
-      while (nextIdx < comments.length && comments[nextIdx].vposMs / 1000 <= vt)
-        activateCmt(comments[nextIdx++]);
-      for (const a of active) a.x += a.vx * dt;
+      while (nextIdx < comments.length && comments[nextIdx].vposMs/1000 <= vt) activateCmt(comments[nextIdx++]);
+      for (const a of active) a.x += a.vx*dt;
     }
-    active = active.filter(a =>
-      a.pos === 'scroll' ? a.x + a.w > 0 : vid.currentTime < a.expAt
-    );
-
+    active = active.filter(a => a.pos==='scroll' ? a.x+a.w>0 : vid.currentTime<a.expAt);
     ctx.clearRect(0, 0, cvs.width, cvs.height);
     if (dmkOn) {
-      ctx.shadowColor = 'rgba(0,0,0,.85)';
-      ctx.shadowBlur  = 3;
-      ctx.shadowOffsetX = ctx.shadowOffsetY = 1;
-      for (const a of active) {
-        ctx.font = `bold ${a.fs}px sans-serif`;
-        ctx.fillStyle = a.color;
-        ctx.fillText(a.body, a.x, a.y);
-      }
-      ctx.shadowBlur = ctx.shadowOffsetX = ctx.shadowOffsetY = 0;
+      ctx.shadowColor='rgba(0,0,0,.85)'; ctx.shadowBlur=3; ctx.shadowOffsetX=ctx.shadowOffsetY=1;
+      for (const a of active) { ctx.font=`bold ${a.fs}px sans-serif`; ctx.fillStyle=a.color; ctx.fillText(a.body,a.x,a.y); }
+      ctx.shadowBlur=ctx.shadowOffsetX=ctx.shadowOffsetY=0;
     }
-    cactive.textContent = dmkOn && active.length ? `表示中: ${active.length}` : '';
+    cactive.textContent = dmkOn&&active.length ? `表示中: ${active.length}` : '';
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
 
   // ── controls ─────────────────────────────────────────────────
   function fmt(s) {
-    if (!isFinite(s) || s < 0) s = 0;
+    if (!isFinite(s)||s<0) s=0;
     return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
   }
-
   bplay.addEventListener('click', () => vid.paused ? vid.play() : vid.pause());
-  vid.addEventListener('play',  () => { bplay.textContent = '⏸'; lastTs = null; });
-  vid.addEventListener('pause', () => { bplay.textContent = '▶'; });
-  vid.addEventListener('ended', () => { bplay.textContent = '▶'; });
-
+  vid.addEventListener('play',  () => { bplay.textContent='⏸'; lastTs=null; });
+  vid.addEventListener('pause', () =>   bplay.textContent='▶');
+  vid.addEventListener('ended', () =>   bplay.textContent='▶');
   vid.addEventListener('timeupdate', () => {
     if (!seekEl._drag) seekEl.value = vid.currentTime;
-    tdisp.textContent = fmt(vid.currentTime) + ' / ' + fmt(vid.duration);
+    tdisp.textContent = fmt(vid.currentTime)+' / '+fmt(vid.duration);
   });
   function updateMax() { seekEl.max = isFinite(vid.duration) ? vid.duration : 0; }
   vid.addEventListener('durationchange', updateMax);
-  vid.addEventListener('loadedmetadata', updateMax);
 
-  seekEl.addEventListener('mousedown', () => seekEl._drag = true);
-  seekEl.addEventListener('input',     () => vid.currentTime = +seekEl.value);
-  seekEl.addEventListener('change',    () => { seekEl._drag = false; vid.currentTime = +seekEl.value; resetDanmaku(); });
+  seekEl.addEventListener('mousedown', () => seekEl._drag=true);
+  seekEl.addEventListener('input',     () => vid.currentTime=+seekEl.value);
+  seekEl.addEventListener('change',    () => { seekEl._drag=false; vid.currentTime=+seekEl.value; resetDanmaku(); });
   vid.addEventListener('seeked', resetDanmaku);
 
   document.getElementById('bmute').addEventListener('click', function() {
-    vid.muted = !vid.muted; this.textContent = vid.muted ? '🔇' : '🔊';
+    vid.muted=!vid.muted; this.textContent=vid.muted?'🔇':'🔊';
   });
-  document.getElementById('vol').addEventListener('input', function() { vid.volume = +this.value; });
-  document.getElementById('spd').addEventListener('change', function() { vid.playbackRate = +this.value; });
+  document.getElementById('vol').addEventListener('input', function() { vid.volume=+this.value; });
+  document.getElementById('spd').addEventListener('change', function() { vid.playbackRate=+this.value; });
 
   bdmk.addEventListener('click', () => {
-    dmkOn = !dmkOn; bdmk.classList.toggle('on', dmkOn);
-    if (!dmkOn) ctx.clearRect(0, 0, cvs.width, cvs.height);
+    dmkOn=!dmkOn; bdmk.classList.toggle('on',dmkOn);
+    if (!dmkOn) ctx.clearRect(0,0,cvs.width,cvs.height);
   });
 
   document.addEventListener('keydown', e => {
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-    if (e.key === ' ')          { e.preventDefault(); bplay.click(); }
-    else if (e.key === 'ArrowLeft')  vid.currentTime = Math.max(0, vid.currentTime - 5);
-    else if (e.key === 'ArrowRight') vid.currentTime = Math.min(vid.duration||0, vid.currentTime + 5);
+    if (e.target.tagName==='INPUT'||e.target.tagName==='SELECT') return;
+    if (e.key===' ')           { e.preventDefault(); bplay.click(); }
+    else if (e.key==='ArrowLeft')  vid.currentTime=Math.max(0,vid.currentTime-5);
+    else if (e.key==='ArrowRight') vid.currentTime=Math.min(vid.duration||0,vid.currentTime+5);
   });
   </script>
 </body>
