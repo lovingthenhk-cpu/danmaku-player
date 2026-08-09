@@ -39,7 +39,7 @@
       width: 100%; height: 100%;
       display: block; object-fit: contain;
     }
-    .pvideo canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+    .pvideo canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
 
     /* south (height) handle — visible bar under the video */
     .resize-handle-s {
@@ -414,86 +414,19 @@
 
   // ── loading a video (from drop/picker, or restored from IndexedDB) ──
   let restoreTime = null;
-  let currentFile = null, remuxAttempted = false, isRemuxing = false;
+  let currentFile = null;
 
-  // ── mkv → mp4 リマックス(コンテナの入れ替えのみ・再エンコードなし) ──
-  // iOS Safari など mkv コンテナをネイティブ再生できない環境向けのフォールバック。
-  // ffmpeg.wasm を初回のみ遅延ロードする(CDN配信・COOP/COEP不要のsingle-threadコアを使用)。
-  let ffmpegInstance = null;
-  async function toBlobURLLocal(url, mimeType) {
-    const buf = await (await fetch(url)).arrayBuffer();
-    return URL.createObjectURL(new Blob([buf], { type: mimeType }));
-  }
-  async function loadFFmpegOnce() {
-    if (ffmpegInstance) return ffmpegInstance;
-    const FFMPEG_BASE = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/umd';
-    const CORE_BASE   = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd';
-    // ffmpeg.wasmは内部でWorkerを同一オリジンのスクリプトとして生成しようとするため、
-    // CDN配信のままだとクロスオリジン制約に引っかかる。worker本体をBlob化した上で、
-    // ffmpeg.js側のWorker生成箇所をそのBlob URLに差し替えてから読み込む。
-    const workerChunkBlobURL = await toBlobURLLocal(FFMPEG_BASE + '/814.ffmpeg.js', 'text/javascript');
-    let ffmpegSrc = await (await fetch(FFMPEG_BASE + '/ffmpeg.js')).text();
-    ffmpegSrc = ffmpegSrc.replace('new URL(e.p+e.u(814),e.b)', `new URL(${JSON.stringify(workerChunkBlobURL)})`);
-    const ffmpegBlobURL = URL.createObjectURL(new Blob([ffmpegSrc], { type: 'text/javascript' }));
-    // ffmpeg.js内部の「自身のパスを自動検出する」処理は、document.currentScriptか
-    // 何らかの<script src>要素の存在を前提にしている。動的importだとどちらも無いため、
-    // 検出用のダミー<script src>を先に挿し込んでおく(実際に読み込ませる必要はない)。
-    if (!document.querySelector('script[data-ffmpeg-probe]')) {
-      const probe = document.createElement('script');
-      probe.src = FFMPEG_BASE + '/ffmpeg.js';
-      probe.setAttribute('data-ffmpeg-probe', '1');
-      probe.defer = true;
-      document.head.appendChild(probe);
-    }
-    await import(ffmpegBlobURL);
-    const { FFmpeg } = window.FFmpegWASM;
-    const ff = new FFmpeg();
-    await ff.load({
-      coreURL: await toBlobURLLocal(CORE_BASE + '/ffmpeg-core.js', 'text/javascript'),
-      wasmURL: await toBlobURLLocal(CORE_BASE + '/ffmpeg-core.wasm', 'application/wasm'),
-    });
-    ffmpegInstance = ff;
-    return ff;
-  }
-  async function remuxToMp4(file, onProgress) {
-    const ff = await loadFFmpegOnce();
-    const onP = ({ progress }) => onProgress && onProgress(Math.max(0, Math.min(1, progress)));
-    ff.on('progress', onP);
-    try {
-      ff.deleteFile('input.mkv').catch(() => {});
-      ff.deleteFile('output.mp4').catch(() => {});
-      await ff.writeFile('input.mkv', new Uint8Array(await file.arrayBuffer()));
-      // 映像・音声ストリームだけをコピー(再エンコードなし)でmp4コンテナに封じ直す。
-      // 字幕トラックなどmp4非対応の要素は引き継がない。
-      await ff.exec(['-i', 'input.mkv', '-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-f', 'mp4', '-movflags', 'faststart', 'output.mp4']);
-      const data = await ff.readFile('output.mp4');
-      return new Blob([data.buffer], { type: 'video/mp4' });
-    } finally {
-      ff.off('progress', onP);
-    }
-  }
-
-  // <video>で再生できなかった場合、mkvならmp4へのリマックスを一度だけ自動で試みる
-  vid.addEventListener('error', async () => {
-    if (isRemuxing || remuxAttempted || !currentFile) return;
+  // <video>で再生できなかった場合の案内。
+  // 以前はffmpeg.wasmでブラウザ内リマックスを自動で試みていたが、
+  // 数百MB級のmkvをWASMメモリに載せようとするとメモリ不足で
+  // 端末(特にRAMの少ないiPad等)がフリーズ・再起動する事例が確認されたため撤去。
+  // 現在は自動処理を一切行わず、外部での変換を案内するだけに留める。
+  vid.addEventListener('error', () => {
+    if (!currentFile) return;
     const name = (currentFile.name || '').toLowerCase();
     const isMkv = name.endsWith('.mkv') || currentFile.type === 'video/x-matroska' || currentFile.type === '';
     if (!isMkv) return;
-    remuxAttempted = true;
-    isRemuxing = true;
-    vstatus.textContent = 'この端末では直接再生できないため、mp4に変換しています…';
-    try {
-      const blob = await remuxToMp4(currentFile, p => {
-        vstatus.textContent = `mp4に変換中… ${Math.round(p*100)}%`;
-      });
-      vstatus.textContent = '変換完了、読み込み直しています…';
-      vid.src = URL.createObjectURL(blob);
-      vid.load();
-    } catch (e) {
-      vstatus.textContent = '⚠ 変換に失敗しました: ' + e.message;
-    } finally {
-      isRemuxing = false;
-    }
+    vstatus.textContent = '⚠ この端末ではmkvを直接再生できません。PC/Macで ffmpeg -i 元ファイル.mkv -c copy 出力.mp4 を実行してmp4に変換してから読み込んでください（映像・音声の再エンコードなしで数秒〜数分程度で終わります）';
   });
 
   async function handleVideoFile(f, opts) {
@@ -502,7 +435,6 @@
     const name = f.name || '動画';
 
     currentFile = f;
-    remuxAttempted = false;
     vname.textContent   = name;
     vstatus.textContent = restore ? '保存されていた動画を読み込み中…' : '';
     drop.classList.add('loaded');
@@ -552,25 +484,28 @@
   })();
 
   // ── canvas (display / live preview) ─────────────────────────────
-  // フォントサイズ・表示時間は本家ニコニコ(HTML5プレイヤー)の実装値に準拠
-  // (基準: 1920x1080キャンバス／small=18 medium=27 big=39 px／
-  //  流れるコメントは既定で(long+100)=400cs=4.0秒かけて画面を通過、
-  //  固定(上下)コメントは既定でlong=300cs=3.0秒表示)
-  const REF_H = 1080;
+  // フォントサイズの比率(small:medium:big)・表示時間は本家ニコニコ(HTML5プレイヤー)の
+  // 実装値に準拠(small=18 medium=27 big=39 px を基準比率として使用)。
+  // ただし基準となる高さは用途によって使い分ける:
+  //  - ライブプレビュー: 実際に画面に表示されるボックスのCSSサイズがそのまま
+  //    canvasの解像度になる(このアプリの標準的なボックス高さ(300〜800px程度)を
+  //    想定してLIVE_REF_Hを設定)。動画のネイティブ解像度を基準にすると、
+  //    キャンバスをCSSで表示ボックスへ引き伸ばす際に二重にスケールダウンされて
+  //    文字が極端に小さくなってしまうため、あえて動画解像度は使わない。
+  //  - 書き出し(エンコード): 実際の動画ピクセル解像度で描画するので、
+  //    本家と同じ1920x1080基準(EXPORT_REF_H)をそのまま使う。
+  const LIVE_REF_H = 540, EXPORT_REF_H = 1080;
   const FONT_SIZE = { small: 18, medium: 27, big: 39 };
   const NAKA_DUR = 4.0, FIXED_DUR = 3.0;
   let scrollLanes = [], topLanes = [], botLanes = [];
 
   function resizeCanvas() {
-    // フォントサイズのスケール基準(REF_H)は「本家の動画解像度」を想定した値なので、
-    // 表示ボックスのCSSサイズではなく動画そのもののネイティブ解像度を使う。
-    // 表示上の引き伸ばしはCSS側(width:100%;height:100%)に任せる。
-    cvs.width  = vid.videoWidth  || vid.offsetWidth  || 640;
-    cvs.height = vid.videoHeight || vid.offsetHeight || 360;
+    cvs.width  = vid.offsetWidth  || 640;
+    cvs.height = vid.offsetHeight || 360;
     initLanes();
   }
   function initLanes() {
-    const scale = cvs.height / REF_H;
+    const scale = cvs.height / LIVE_REF_H;
     const lh = FONT_SIZE.medium * scale + 4;
     const n = Math.max(1, Math.floor(cvs.height / lh));
     scrollLanes = new Array(n).fill(null);
@@ -608,7 +543,7 @@
     darkgreen:'#228822', darkblue:'#2255cc'
   };
 
-  // scale: cvs.height(実際の再生画面の高さ) / REF_H(本家の基準高さ1080px)
+  // scale: cvs.height(実際の再生画面の高さ) / LIVE_REF_H
   function parseCmd(cmds, scale) {
     let color = '#ffffff', size = 'medium', pos = 'scroll';
     for (const c of (cmds || [])) {
@@ -653,7 +588,7 @@
   let active = [], nextIdx = 0, dmkOn = true, lastTs = null;
 
   function activateCmt(c) {
-    const scale = cvs.height / REF_H;
+    const scale = cvs.height / LIVE_REF_H;
     const { color, fs, pos } = parseCmd(c.commands, scale);
     const vt = vid.currentTime;
     ctx.font = `bold ${fs}px sans-serif`;
@@ -839,7 +774,7 @@
 
     const outW = vid.videoWidth  || 1280;
     const outH = vid.videoHeight || 720;
-    const scale = outH / REF_H;
+    const scale = outH / EXPORT_REF_H;
 
     const composeCanvas = document.createElement('canvas');
     composeCanvas.width = outW; composeCanvas.height = outH;
