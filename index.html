@@ -469,7 +469,13 @@
   })();
 
   // ── canvas (display / live preview) ─────────────────────────────
-  const BASE = 22, SPEED = 280, FIXED_DUR = 3.5;
+  // フォントサイズ・表示時間は本家ニコニコ(HTML5プレイヤー)の実装値に準拠
+  // (基準: 1920x1080キャンバス／small=18 medium=27 big=39 px／
+  //  流れるコメントは既定で(long+100)=400cs=4.0秒かけて画面を通過、
+  //  固定(上下)コメントは既定でlong=300cs=3.0秒表示)
+  const REF_H = 1080;
+  const FONT_SIZE = { small: 18, medium: 27, big: 39 };
+  const NAKA_DUR = 4.0, FIXED_DUR = 3.0;
   let scrollLanes = [], topLanes = [], botLanes = [];
 
   function resizeCanvas() {
@@ -478,8 +484,10 @@
     initLanes();
   }
   function initLanes() {
-    const n = Math.max(1, Math.floor(cvs.height / (BASE + 4)));
-    scrollLanes = new Array(n).fill(0);
+    const scale = cvs.height / REF_H;
+    const lh = FONT_SIZE.medium * scale + 4;
+    const n = Math.max(1, Math.floor(cvs.height / lh));
+    scrollLanes = new Array(n).fill(null);
     topLanes    = new Array(Math.max(1, Math.floor(n * 0.45))).fill(0);
     botLanes    = new Array(Math.max(1, Math.floor(n * 0.45))).fill(0);
   }
@@ -513,23 +521,44 @@
     darkgreen:'#228822', darkblue:'#2255cc'
   };
 
-  function parseCmd(cmds) {
-    let color = '#ffffff', fs = BASE, pos = 'scroll';
+  // scale: cvs.height(実際の再生画面の高さ) / REF_H(本家の基準高さ1080px)
+  function parseCmd(cmds, scale) {
+    let color = '#ffffff', size = 'medium', pos = 'scroll';
     for (const c of (cmds || [])) {
       const k = c.toLowerCase();
       if (COLORS[k])     color = COLORS[k];
-      else if (k==='big')    fs = Math.round(BASE*1.5);
-      else if (k==='small')  fs = Math.round(BASE*0.72);
-      else if (k==='medium') fs = BASE;
+      else if (k==='big')    size = 'big';
+      else if (k==='small')  size = 'small';
+      else if (k==='medium') size = 'medium';
       else if (k==='ue')     pos = 'top';
       else if (k==='shita')  pos = 'bot';
-      else if (k==='naka')   pos = 'center';
+      // 「naka」は中央固定ではなく、通常の流れるコメントを明示するコマンド
+      else if (k==='naka')   pos = 'scroll';
     }
+    const fs = Math.max(1, Math.round(FONT_SIZE[size] * scale));
     return { color, fs, pos };
   }
 
+  // 上/下固定コメント用: 単純に「表示時間切れのレーン」を探す
   function freeLane(lanes, vt) {
     for (let i = 0; i < lanes.length; i++) if (lanes[i] <= vt) return i;
+    return Math.floor(Math.random() * lanes.length);
+  }
+
+  // 流れるコメント用: 本家同様、コメントごとに横幅で速度が変わる
+  // (どのコメントも画面を横断するのにNAKA_DUR秒かかるよう速度を決める)ため、
+  // 後から出たコメントが先行コメントに追いつく可能性を考慮してレーンを選ぶ
+  function freeScrollLane(lanes, vt, speed, w, cvsWidth) {
+    for (let i = 0; i < lanes.length; i++) {
+      const occ = lanes[i];
+      if (!occ || vt >= occ.expAt) return i; // 完全に空いている
+      const occX = occ.x0 - occ.speed * (vt - occ.t0);
+      const gap  = cvsWidth - occX - occ.w; // 新規コメントの先端と先行コメント後端との距離
+      if (gap <= 0) continue;               // 既に埋まっている
+      if (speed <= occ.speed) return i;     // 追いつけない速度なので安全
+      const tCatch = vt + gap / (speed - occ.speed);
+      if (tCatch >= occ.expAt) return i;    // 追いつく前に先行コメントが消える
+    }
     return Math.floor(Math.random() * lanes.length);
   }
 
@@ -537,7 +566,8 @@
   let active = [], nextIdx = 0, dmkOn = true, lastTs = null;
 
   function activateCmt(c) {
-    const { color, fs, pos } = parseCmd(c.commands);
+    const scale = cvs.height / REF_H;
+    const { color, fs, pos } = parseCmd(c.commands, scale);
     const vt = vid.currentTime;
     ctx.font = `bold ${fs}px sans-serif`;
     const w = ctx.measureText(c.body).width;
@@ -545,10 +575,11 @@
     const a = { body: c.body, color, fs, pos, x: 0, y: 0, vx: 0, expAt: 0, w };
 
     if (pos === 'scroll') {
-      const li = freeLane(scrollLanes, vt);
-      a.y = Math.min(li*lh+fs, cvs.height-4); a.x = cvs.width; a.vx = -SPEED;
-      a.expAt = vt + (cvs.width+w)/SPEED;
-      scrollLanes[li] = vt + (w+10)/SPEED;
+      const speed = (cvs.width + w) / NAKA_DUR;
+      const li = freeScrollLane(scrollLanes, vt, speed, w, cvs.width);
+      a.y = Math.min(li*lh+fs, cvs.height-4); a.x = cvs.width; a.vx = -speed;
+      a.expAt = vt + NAKA_DUR;
+      scrollLanes[li] = { x0: cvs.width, t0: vt, speed, w, expAt: a.expAt };
     } else if (pos === 'top') {
       const li = freeLane(topLanes, vt);
       a.y = Math.min(li*lh+fs, cvs.height/2); a.x = (cvs.width-w)/2;
@@ -564,7 +595,7 @@
   }
 
   function resetDanmaku() {
-    active = []; scrollLanes.fill(0); topLanes.fill(0); botLanes.fill(0); lastTs = null;
+    active = []; scrollLanes.fill(null); topLanes.fill(0); botLanes.fill(0); lastTs = null;
     const vt = vid.currentTime;
     nextIdx = 0;
     for (let i = 0; i < comments.length; i++) {
@@ -647,28 +678,28 @@
   let isEncoding = false;
 
   function encCreateState(w, h, scale) {
-    const n = Math.max(1, Math.floor(h / ((BASE*scale) + 4)));
+    const lh = FONT_SIZE.medium*scale + 4;
+    const n = Math.max(1, Math.floor(h / lh));
     return {
       w, h, scale,
-      scrollLanes: new Array(n).fill(0),
+      scrollLanes: new Array(n).fill(null),
       topLanes:    new Array(Math.max(1, Math.floor(n*0.45))).fill(0),
       botLanes:    new Array(Math.max(1, Math.floor(n*0.45))).fill(0),
       active: [], nextIdx: 0
     };
   }
   function encActivate(st, c, vt, cctx2) {
-    const { color, fs: fs0, pos } = parseCmd(c.commands);
-    const fs = Math.round(fs0 * st.scale);
-    const spd = SPEED * st.scale;
+    const { color, fs, pos } = parseCmd(c.commands, st.scale);
     cctx2.font = `bold ${fs}px sans-serif`;
     const w = cctx2.measureText(c.body).width;
     const lh = fs + 4;
     const a = { body: c.body, color, fs, pos, x: 0, y: 0, vx: 0, expAt: 0, w };
     if (pos === 'scroll') {
-      const li = freeLane(st.scrollLanes, vt);
-      a.y = Math.min(li*lh+fs, st.h-4); a.x = st.w; a.vx = -spd;
-      a.expAt = vt + (st.w+w)/spd;
-      st.scrollLanes[li] = vt + (w+10)/spd;
+      const speed = (st.w + w) / NAKA_DUR;
+      const li = freeScrollLane(st.scrollLanes, vt, speed, w, st.w);
+      a.y = Math.min(li*lh+fs, st.h-4); a.x = st.w; a.vx = -speed;
+      a.expAt = vt + NAKA_DUR;
+      st.scrollLanes[li] = { x0: st.w, t0: vt, speed, w, expAt: a.expAt };
     } else if (pos === 'top') {
       const li = freeLane(st.topLanes, vt);
       a.y = Math.min(li*lh+fs, st.h/2); a.x = (st.w-w)/2;
@@ -687,8 +718,7 @@
       encActivate(st, comments[st.nextIdx], vt, cctx2);
       st.nextIdx++;
     }
-    const spd = SPEED * st.scale;
-    for (const a of st.active) if (a.pos === 'scroll') a.x -= spd*dt;
+    for (const a of st.active) a.x += a.vx*dt;
     st.active = st.active.filter(a => a.pos==='scroll' ? a.x+a.w>0 : vt < a.expAt);
 
     cctx2.shadowColor = 'rgba(0,0,0,.85)';
@@ -722,7 +752,7 @@
 
     const outW = vid.videoWidth  || 1280;
     const outH = vid.videoHeight || 720;
-    const scale = outH / 480;
+    const scale = outH / REF_H;
 
     const composeCanvas = document.createElement('canvas');
     composeCanvas.width = outW; composeCanvas.height = outH;
