@@ -158,6 +158,7 @@
           <option value="2">×2</option>
         </select>
         <button id="bdmk" class="on">弾幕</button>
+        <button id="bcapture">フレームを保存</button>
         <button id="bencode">コメント付きで書き出す</button>
       </div>
       <div class="cbar">
@@ -681,6 +682,40 @@
     dmkOn=!dmkOn; bdmk.classList.toggle('on',dmkOn);
     if (!dmkOn) ctx.clearRect(0,0,cvs.width,cvs.height);
   });
+
+  // ── capture current video frame as an image (no comments burned in) ──
+  const bcapture = document.getElementById('bcapture');
+  function fmtForFilename(s) {
+    if (!isFinite(s) || s < 0) s = 0;
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = Math.floor(s % 60);
+    return (h > 0 ? String(h).padStart(2,'0')+'-' : '') + String(m).padStart(2,'0')+'-'+String(sec).padStart(2,'0');
+  }
+  function saveCurrentFrame() {
+    if (!vid.src || !isFinite(vid.duration) || vid.duration <= 0) {
+      alert('先に動画を読み込んでください');
+      return;
+    }
+    const w = vid.videoWidth, h = vid.videoHeight;
+    if (!w || !h) { alert('フレームを取得できませんでした'); return; }
+    const fc = document.createElement('canvas');
+    fc.width = w; fc.height = h;
+    fc.getContext('2d').drawImage(vid, 0, 0, w, h);
+    fc.toBlob(blob => {
+      if (!blob) { alert('保存に失敗しました'); return; }
+      const base = (vname.textContent || 'video').replace(/\.[^.]+$/, '');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${base}_frame_${fmtForFilename(vid.currentTime)}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    }, 'image/png');
+  }
+  bcapture.addEventListener('click', saveCurrentFrame);
 
   window.addEventListener('beforeunload', savePlayerState);
 
