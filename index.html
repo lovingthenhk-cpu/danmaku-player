@@ -323,38 +323,60 @@
   document.addEventListener('touchend',  endDrag);
 
   // ── MKV attachment extractor ─────────────────────────────────
+  // info.json（ニコニコのメタデータ＋コメント本体を含む）を探す。
+  // コメント数の多い動画ほどこのJSONも肥大化するため、固定サイズで
+  // 決め打ちせず、見つからなければ段階的に読み込み範囲を広げて再試行する。
   async function extractInfoJson(file) {
-    const CHUNK = 5 * 1024 * 1024;
-    const buf   = await file.slice(0, Math.min(file.size, CHUNK)).arrayBuffer();
-    const bytes = new Uint8Array(buf);
-    const needle = new TextEncoder().encode('application/json');
+    const SIZES = [5, 20, 60, 150].map(mb => mb * 1024 * 1024);
+    let lastErr = null;
 
-    let markerEnd = -1;
-    outer: for (let i = 0; i < bytes.length - needle.length; i++) {
-      for (let j = 0; j < needle.length; j++) { if (bytes[i+j] !== needle[j]) continue outer; }
-      markerEnd = i + needle.length; break;
-    }
-    if (markerEnd === -1) throw new Error('info.json アタッチメントが MKV 内に見つかりません');
+    for (const CHUNK of SIZES) {
+      const size  = Math.min(file.size, CHUNK);
+      const buf   = await file.slice(0, size).arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      const needle = new TextEncoder().encode('application/json');
 
-    let jsonStart = -1;
-    for (let i = markerEnd; i < bytes.length - 1; i++) {
-      if (bytes[i] === 0x7B && bytes[i+1] === 0x22) { jsonStart = i; break; }
-    }
-    if (jsonStart === -1) throw new Error('JSON データが見つかりません');
-
-    let depth = 0, inStr = false, esc = false, jsonEnd = -1;
-    for (let i = jsonStart; i < bytes.length; i++) {
-      const b = bytes[i];
-      if (esc)              { esc = false; continue; }
-      if (b === 0x5C && inStr) { esc = true; continue; }
-      if (b === 0x22)       { inStr = !inStr; continue; }
-      if (!inStr) {
-        if      (b === 0x7B) depth++;
-        else if (b === 0x7D) { if (--depth === 0) { jsonEnd = i; break; } }
+      let markerEnd = -1;
+      outer: for (let i = 0; i < bytes.length - needle.length; i++) {
+        for (let j = 0; j < needle.length; j++) { if (bytes[i+j] !== needle[j]) continue outer; }
+        markerEnd = i + needle.length; break;
       }
+      if (markerEnd === -1) {
+        lastErr = new Error('info.json アタッチメントが MKV 内に見つかりません');
+        if (size >= file.size) break;
+        continue;
+      }
+
+      let jsonStart = -1;
+      for (let i = markerEnd; i < bytes.length - 1; i++) {
+        if (bytes[i] === 0x7B && bytes[i+1] === 0x22) { jsonStart = i; break; }
+      }
+      if (jsonStart === -1) {
+        lastErr = new Error('JSON データが見つかりません');
+        if (size >= file.size) break;
+        continue;
+      }
+
+      let depth = 0, inStr = false, esc = false, jsonEnd = -1;
+      for (let i = jsonStart; i < bytes.length; i++) {
+        const b = bytes[i];
+        if (esc)                 { esc = false; continue; }
+        if (b === 0x5C && inStr) { esc = true; continue; }
+        if (b === 0x22)          { inStr = !inStr; continue; }
+        if (!inStr) {
+          if      (b === 0x7B) depth++;
+          else if (b === 0x7D) { if (--depth === 0) { jsonEnd = i; break; } }
+        }
+      }
+      if (jsonEnd === -1) {
+        lastErr = new Error('JSON の終端が見つかりません（コメント数が多く情報量の多い動画かもしれません）');
+        if (size >= file.size) break;
+        continue; // より大きいチャンクで再挑戦
+      }
+
+      return JSON.parse(new TextDecoder().decode(bytes.subarray(jsonStart, jsonEnd + 1)));
     }
-    if (jsonEnd === -1) throw new Error('JSON の終端が見つかりません');
-    return JSON.parse(new TextDecoder().decode(bytes.subarray(jsonStart, jsonEnd + 1)));
+    throw lastErr || new Error('info.json の抽出に失敗しました');
   }
 
   // ── comment extraction ────────────────────────────────────────
