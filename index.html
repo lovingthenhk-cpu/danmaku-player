@@ -39,7 +39,7 @@
       width: 100%; height: 100%;
       display: block; object-fit: contain;
     }
-    .pvideo canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
+    .pvideo canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
 
     /* south (height) handle — visible bar under the video */
     .resize-handle-s {
@@ -180,12 +180,12 @@
     <div class="hint">Space: 再生/停止 &nbsp;|&nbsp; ←→: ±5秒 &nbsp;|&nbsp; 動画の右端・下端・角をドラッグでサイズ変更 &nbsp;|&nbsp; Ctrl+Z: サイズを1つ前に戻す</div>
   </div>
 
+  <script src="./niconicomments.bundle.js"></script>
   <script>
   'use strict';
 
   const vid    = document.getElementById('vid');
-  const cvs    = document.getElementById('cvs');
-  const ctx    = cvs.getContext('2d');
+  let cvs      = document.getElementById('cvs');
   const ps     = document.getElementById('ps');
   const presize= document.getElementById('presize');
   const pvideo = document.getElementById('pvideo');
@@ -458,6 +458,9 @@
     const name = f.name || '動画';
 
     currentFile = f;
+    comments = [];
+    cinfo.textContent = '';
+    rebuildDanmakuRenderer();
     vname.textContent   = name;
     vstatus.textContent = restore ? '保存されていた動画を読み込み中…' : '';
     drop.classList.add('loaded');
@@ -483,7 +486,7 @@
           .filter(c => (c.score || 0) > -2000)
           .sort((a, b) => a.vposMs - b.vposMs);
         cinfo.textContent = `コメント: ${comments.length.toLocaleString()} 件`;
-        resetDanmaku();
+        rebuildDanmakuRenderer();
         vstatus.textContent = `コメント ${comments.length.toLocaleString()} 件を抽出しました`;
         showMeta(data);
       } catch(e) {
@@ -506,40 +509,81 @@
     } catch (e) { /* IndexedDB unavailable or empty — ignore */ }
   })();
 
-  // ── canvas (display / live preview) ─────────────────────────────
-  // フォントサイズの比率(small:medium:big)・表示時間は本家ニコニコ(HTML5プレイヤー)の
-  // 実装値に準拠(small=18 medium=27 big=39 px を基準比率として使用)。
-  // ただし基準となる高さは用途によって使い分ける:
-  //  - ライブプレビュー: 実際に画面に表示されるボックスのCSSサイズがそのまま
-  //    canvasの解像度になる(このアプリの標準的なボックス高さ(300〜800px程度)を
-  //    想定してLIVE_REF_Hを設定)。動画のネイティブ解像度を基準にすると、
-  //    キャンバスをCSSで表示ボックスへ引き伸ばす際に二重にスケールダウンされて
-  //    文字が極端に小さくなってしまうため、あえて動画解像度は使わない。
-  //  - 書き出し(エンコード): 実際の動画ピクセル解像度で描画するので、
-  //    本家と同じ1920x1080基準(EXPORT_REF_H)をそのまま使う。
-  const LIVE_REF_H = 540, EXPORT_REF_H = 1080;
-  const FONT_SIZE = { small: 18, medium: 27, big: 39 };
-  const NAKA_DUR = 4.0, FIXED_DUR = 3.0;
-  let scrollLanes = [], topLanes = [], botLanes = [];
+  // ── Nico-compatible comment renderer (live preview) ─────────────
+  // 職人コメント(CA)は複数コメントの相対配置そのものが表現なので、
+  // 単純な空きレーン探索で1件ずつ移動すると崩れる。
+  // niconicomments の keepCA を使い、旧Flash/現HTML5の差も投稿日から自動判定する。
+  let niconiRenderer = null;
+  let formattedComments = [];
+  let dmkOn = true;
 
-  function resizeCanvas() {
-    cvs.width  = vid.offsetWidth  || 640;
-    cvs.height = vid.offsetHeight || 360;
-    initLanes();
+  function commentDateSeconds(c) {
+    const ms = Date.parse(c && c.postedAt || '');
+    return Number.isFinite(ms) && ms >= 0 ? Math.floor(ms / 1000) : 0;
   }
-  function initLanes() {
-    const scale = cvs.height / LIVE_REF_H;
-    const lh = FONT_SIZE.medium * scale + 4;
-    const n = Math.max(1, Math.floor(cvs.height / lh));
-    scrollLanes = new Array(n).fill(null);
-    topLanes    = new Array(Math.max(1, Math.floor(n * 0.45))).fill(0);
-    botLanes    = new Array(Math.max(1, Math.floor(n * 0.45))).fill(0);
+
+  function formatCommentsForNiconi(raw) {
+    const userIds = new Map();
+    let nextUserId = 1;
+    return (raw || []).map((c, i) => {
+      const rawUser = c && c.userId != null ? String(c.userId) : '__unknown_' + i;
+      if (!userIds.has(rawUser)) userIds.set(rawUser, nextUserId++);
+      const n = Number(c && c.no);
+      return {
+        id: Number.isSafeInteger(n) && n >= 0 ? n : i + 1,
+        vpos: Math.max(0, Math.floor(Number(c && c.vposMs || 0) / 10)),
+        content: String(c && c.body || ''),
+        date: commentDateSeconds(c),
+        date_usec: 0,
+        owner: false,
+        premium: !!(c && c.isPremium),
+        mail: Array.isArray(c && c.commands) ? c.commands.map(String) : [],
+        user_id: userIds.get(rawUser),
+        is_my_post: !!(c && c.isMyPost)
+      };
+    }).sort((x, y) => x.vpos - y.vpos);
   }
-  new ResizeObserver(resizeCanvas).observe(vid);
+
+  function destroyDanmakuRenderer() {
+    if (!niconiRenderer) return;
+    try { niconiRenderer.destroy(); } catch (e) {}
+    niconiRenderer = null;
+  }
+
+  function drawDanmakuFrame(force) {
+    if (!niconiRenderer) return;
+    if (!dmkOn) {
+      niconiRenderer.clear();
+      cactive.textContent = '';
+      return;
+    }
+    if (isEncoding) return;
+    niconiRenderer.drawCanvas((vid.currentTime || 0) * 100, !!force);
+    cactive.textContent = '';
+  }
+
+  function rebuildDanmakuRenderer() {
+    destroyDanmakuRenderer();
+    const oldCanvas = cvs;
+    const freshCanvas = oldCanvas.cloneNode(false);
+    freshCanvas.width = 1920;
+    freshCanvas.height = 1080;
+    oldCanvas.replaceWith(freshCanvas);
+    cvs = freshCanvas;
+    formattedComments = formatCommentsForNiconi(comments);
+    if (!window.NiconiComments || !cvs.width || !cvs.height) return;
+    niconiRenderer = new NiconiComments(cvs, formattedComments, {
+      format: 'formatted',
+      mode: 'default',
+      keepCA: true,
+      lazy: true
+    });
+    drawDanmakuFrame(true);
+  }
+
 
   // Set player size on load: restored size takes priority, else auto-fit to aspect ratio
   vid.addEventListener('loadedmetadata', () => {
-    resizeCanvas();
     const state = loadPlayerState();
     const savedW = state ? normalizePx(state.width)  : '';
     const savedH = state ? normalizePx(state.height) : '';
@@ -558,113 +602,14 @@
     updateMax();
   });
 
-  // ── danmaku helpers (shared by live preview and export) ─────────
-  const COLORS = {
-    white:'#ffffff', red:'#ff5555', pink:'#ff88cc', orange:'#ffaa33',
-    yellow:'#ffee33', green:'#55dd55', cyan:'#44eeff', blue:'#5599ff',
-    purple:'#cc55ff', black:'#444444', maroon:'#cc2222',
-    darkgreen:'#228822', darkblue:'#2255cc'
-  };
-
-  // scale: cvs.height(実際の再生画面の高さ) / LIVE_REF_H
-  function parseCmd(cmds, scale) {
-    let color = '#ffffff', size = 'medium', pos = 'scroll';
-    for (const c of (cmds || [])) {
-      const k = c.toLowerCase();
-      if (COLORS[k])     color = COLORS[k];
-      else if (k==='big')    size = 'big';
-      else if (k==='small')  size = 'small';
-      else if (k==='medium') size = 'medium';
-      else if (k==='ue')     pos = 'top';
-      else if (k==='shita')  pos = 'bot';
-      // 「naka」は中央固定ではなく、通常の流れるコメントを明示するコマンド
-      else if (k==='naka')   pos = 'scroll';
-    }
-    const fs = Math.max(1, Math.round(FONT_SIZE[size] * scale));
-    return { color, fs, pos };
-  }
-
-  // 上/下固定コメント用: 単純に「表示時間切れのレーン」を探す
-  function freeLane(lanes, vt) {
-    for (let i = 0; i < lanes.length; i++) if (lanes[i] <= vt) return i;
-    return Math.floor(Math.random() * lanes.length);
-  }
-
-  // 流れるコメント用: 本家同様、コメントごとに横幅で速度が変わる
-  // (どのコメントも画面を横断するのにNAKA_DUR秒かかるよう速度を決める)ため、
-  // 後から出たコメントが先行コメントに追いつく可能性を考慮してレーンを選ぶ
-  function freeScrollLane(lanes, vt, speed, w, cvsWidth) {
-    for (let i = 0; i < lanes.length; i++) {
-      const occ = lanes[i];
-      if (!occ || vt >= occ.expAt) return i; // 完全に空いている
-      const occX = occ.x0 - occ.speed * (vt - occ.t0);
-      const gap  = cvsWidth - occX - occ.w; // 新規コメントの先端と先行コメント後端との距離
-      if (gap <= 0) continue;               // 既に埋まっている
-      if (speed <= occ.speed) return i;     // 追いつけない速度なので安全
-      const tCatch = vt + gap / (speed - occ.speed);
-      if (tCatch >= occ.expAt) return i;    // 追いつく前に先行コメントが消える
-    }
-    return Math.floor(Math.random() * lanes.length);
-  }
-
-  // ── live preview danmaku engine (drawn on the overlay canvas) ────
-  let active = [], nextIdx = 0, dmkOn = true, lastTs = null;
-
-  function activateCmt(c) {
-    const scale = cvs.height / LIVE_REF_H;
-    const { color, fs, pos } = parseCmd(c.commands, scale);
-    const vt = vid.currentTime;
-    ctx.font = `bold ${fs}px sans-serif`;
-    const w = ctx.measureText(c.body).width;
-    const lh = fs + 4;
-    const a = { body: c.body, color, fs, pos, x: 0, y: 0, vx: 0, expAt: 0, w };
-
-    if (pos === 'scroll') {
-      const speed = (cvs.width + w) / NAKA_DUR;
-      const li = freeScrollLane(scrollLanes, vt, speed, w, cvs.width);
-      a.y = Math.min(li*lh+fs, cvs.height-4); a.x = cvs.width; a.vx = -speed;
-      a.expAt = vt + NAKA_DUR;
-      scrollLanes[li] = { x0: cvs.width, t0: vt, speed, w, expAt: a.expAt };
-    } else if (pos === 'top') {
-      const li = freeLane(topLanes, vt);
-      a.y = Math.min(li*lh+fs, cvs.height/2); a.x = (cvs.width-w)/2;
-      a.expAt = vt+FIXED_DUR; topLanes[li] = a.expAt;
-    } else if (pos === 'bot') {
-      const li = freeLane(botLanes, vt);
-      a.y = Math.max(cvs.height-li*lh-4, fs); a.x = (cvs.width-w)/2;
-      a.expAt = vt+FIXED_DUR; botLanes[li] = a.expAt;
-    } else {
-      a.y = cvs.height/2+fs/2; a.x = (cvs.width-w)/2; a.expAt = vt+FIXED_DUR;
-    }
-    active.push(a);
-  }
-
   function resetDanmaku() {
-    active = []; scrollLanes.fill(null); topLanes.fill(0); botLanes.fill(0); lastTs = null;
-    const vt = vid.currentTime;
-    nextIdx = 0;
-    for (let i = 0; i < comments.length; i++) {
-      if (comments[i].vposMs/1000 >= vt) { nextIdx = i; return; }
-    }
-    nextIdx = comments.length;
+    drawDanmakuFrame(true);
   }
 
-  function tick(ts) {
-    const dt = lastTs === null ? 0 : Math.min((ts-lastTs)/1000, 0.1);
-    lastTs = ts;
+  function tick() {
     if (!vid.paused && !vid.ended && !isEncoding) {
-      const vt = vid.currentTime;
-      while (nextIdx < comments.length && comments[nextIdx].vposMs/1000 <= vt) activateCmt(comments[nextIdx++]);
-      for (const a of active) a.x += a.vx*dt;
+      drawDanmakuFrame(false);
     }
-    active = active.filter(a => a.pos==='scroll' ? a.x+a.w>0 : vid.currentTime<a.expAt);
-    ctx.clearRect(0, 0, cvs.width, cvs.height);
-    if (dmkOn) {
-      ctx.shadowColor='rgba(0,0,0,.85)'; ctx.shadowBlur=3; ctx.shadowOffsetX=ctx.shadowOffsetY=1;
-      for (const a of active) { ctx.font=`bold ${a.fs}px sans-serif`; ctx.fillStyle=a.color; ctx.fillText(a.body,a.x,a.y); }
-      ctx.shadowBlur=ctx.shadowOffsetX=ctx.shadowOffsetY=0;
-    }
-    cactive.textContent = dmkOn&&active.length ? `表示中: ${active.length}` : '';
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
@@ -675,7 +620,7 @@
     return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
   }
   bplay.addEventListener('click', () => vid.paused ? vid.play() : vid.pause());
-  vid.addEventListener('play',  () => { bplay.textContent='⏸'; lastTs=null; });
+  vid.addEventListener('play',  () => { bplay.textContent='⏸'; drawDanmakuFrame(true); });
   vid.addEventListener('pause', () => { bplay.textContent='▶'; savePlayerState(); });
   vid.addEventListener('ended', () =>   bplay.textContent='▶');
 
@@ -702,7 +647,7 @@
 
   bdmk.addEventListener('click', () => {
     dmkOn=!dmkOn; bdmk.classList.toggle('on',dmkOn);
-    if (!dmkOn) ctx.clearRect(0,0,cvs.width,cvs.height);
+    drawDanmakuFrame(true);
   });
 
   // ── capture current video frame as an image (no comments burned in) ──
@@ -756,57 +701,6 @@
   // ── encode: burn comments into the video and download ───────────
   let isEncoding = false;
 
-  function encCreateState(w, h, scale) {
-    const lh = FONT_SIZE.medium*scale + 4;
-    const n = Math.max(1, Math.floor(h / lh));
-    return {
-      w, h, scale,
-      scrollLanes: new Array(n).fill(null),
-      topLanes:    new Array(Math.max(1, Math.floor(n*0.45))).fill(0),
-      botLanes:    new Array(Math.max(1, Math.floor(n*0.45))).fill(0),
-      active: [], nextIdx: 0
-    };
-  }
-  function encActivate(st, c, vt, cctx2) {
-    const { color, fs, pos } = parseCmd(c.commands, st.scale);
-    cctx2.font = `bold ${fs}px sans-serif`;
-    const w = cctx2.measureText(c.body).width;
-    const lh = fs + 4;
-    const a = { body: c.body, color, fs, pos, x: 0, y: 0, vx: 0, expAt: 0, w };
-    if (pos === 'scroll') {
-      const speed = (st.w + w) / NAKA_DUR;
-      const li = freeScrollLane(st.scrollLanes, vt, speed, w, st.w);
-      a.y = Math.min(li*lh+fs, st.h-4); a.x = st.w; a.vx = -speed;
-      a.expAt = vt + NAKA_DUR;
-      st.scrollLanes[li] = { x0: st.w, t0: vt, speed, w, expAt: a.expAt };
-    } else if (pos === 'top') {
-      const li = freeLane(st.topLanes, vt);
-      a.y = Math.min(li*lh+fs, st.h/2); a.x = (st.w-w)/2;
-      a.expAt = vt+FIXED_DUR; st.topLanes[li] = a.expAt;
-    } else if (pos === 'bot') {
-      const li = freeLane(st.botLanes, vt);
-      a.y = Math.max(st.h-li*lh-4, fs); a.x = (st.w-w)/2;
-      a.expAt = vt+FIXED_DUR; st.botLanes[li] = a.expAt;
-    } else {
-      a.y = st.h/2+fs/2; a.x = (st.w-w)/2; a.expAt = vt+FIXED_DUR;
-    }
-    st.active.push(a);
-  }
-  function encStep(st, vt, dt, cctx2) {
-    while (st.nextIdx < comments.length && comments[st.nextIdx].vposMs/1000 <= vt) {
-      encActivate(st, comments[st.nextIdx], vt, cctx2);
-      st.nextIdx++;
-    }
-    for (const a of st.active) a.x += a.vx*dt;
-    st.active = st.active.filter(a => a.pos==='scroll' ? a.x+a.w>0 : vt < a.expAt);
-
-    cctx2.shadowColor = 'rgba(0,0,0,.85)';
-    cctx2.shadowBlur = 3 * st.scale;
-    cctx2.shadowOffsetX = cctx2.shadowOffsetY = 1 * st.scale;
-    for (const a of st.active) { cctx2.font = `bold ${a.fs}px sans-serif`; cctx2.fillStyle = a.color; cctx2.fillText(a.body, a.x, a.y); }
-    cctx2.shadowBlur = cctx2.shadowOffsetX = cctx2.shadowOffsetY = 0;
-  }
-
   function updateEncodeUI(on) {
     bencode.disabled = on;
     bencode.textContent = on ? 'エンコード中…' : 'コメント付きで書き出す';
@@ -831,11 +725,15 @@
 
     const outW = vid.videoWidth  || 1280;
     const outH = vid.videoHeight || 720;
-    const scale = outH / EXPORT_REF_H;
 
     const composeCanvas = document.createElement('canvas');
     composeCanvas.width = outW; composeCanvas.height = outH;
     const cctx2 = composeCanvas.getContext('2d');
+    const commentCanvas = document.createElement('canvas');
+    commentCanvas.width = 1920; commentCanvas.height = 1080;
+    // WebGL canvasはcaptureStream用2D canvasへ安定して転写できないため、書き出しだけCanvas2D rendererを使う。
+    const commentRenderer2d = new NiconiComments.internal.renderer.CanvasRenderer(commentCanvas);
+    const exportRenderer = new NiconiComments(commentRenderer2d, formattedComments, { format: 'formatted', mode: 'default', keepCA: true, lazy: false });
 
     let audioTracks = [];
     try {
@@ -859,18 +757,14 @@
     await new Promise(r => { vid.currentTime = 0; const h = () => { vid.removeEventListener('seeked', h); r(); }; vid.addEventListener('seeked', h); });
     vid.playbackRate = 1;
 
-    const st = encCreateState(outW, outH, scale);
-    let lastPerf = performance.now();
     let rafId = null;
 
     function frameLoop() {
-      const now = performance.now();
-      const dt = (now - lastPerf) / 1000;
-      lastPerf = now;
       const vt = vid.currentTime;
 
       cctx2.drawImage(vid, 0, 0, outW, outH);
-      encStep(st, vt, dt, cctx2);
+      exportRenderer.drawCanvas(vt * 100, true);
+      cctx2.drawImage(commentCanvas, 0, 0, outW, outH);
 
       encstatus.textContent = `エンコード中: ${fmt(vt)} / ${fmt(vid.duration)}`;
       rafId = requestAnimationFrame(frameLoop);
@@ -890,6 +784,7 @@
     cancelAnimationFrame(rafId);
     recorder.stop();
     const blob = await new Promise(resolve => { recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType })); });
+    exportRenderer.destroy();
 
     vid.currentTime = prevTime;
     vid.playbackRate = prevRate;
